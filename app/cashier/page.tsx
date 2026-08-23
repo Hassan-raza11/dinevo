@@ -1,0 +1,1339 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+
+
+type ReceiptData = {
+  orderNumber: string;
+  tableNumber: string;
+  total: number;
+  paymentMethod: "cash" | "card" | "other";
+  received?: number;
+  change?: number;
+  paidAt: number;
+};
+
+type CashierItem = {
+  id: number;
+  name: string;
+  quantity: number;
+  price: number;
+};
+
+type GuestOrder = {
+  guestName: string;
+  items: CashierItem[];
+};
+
+type CashierOrder = {
+  id: number;
+  orderNumber: string;
+  tableNumber: string;
+  createdAt: number;
+  guests: GuestOrder[];
+  total: number;
+  paymentStatus?: "unpaid" | "paid";
+  paymentMethod?: "cash" | "card" | "other";
+  paidAt?: number;
+  received?: number;
+change?: number;
+};
+
+export default function CashierPage() {
+
+    const [receipt, setReceipt] = useState<ReceiptData | null>(null);
+    const router = useRouter();
+  const [orders, setOrders] = useState<CashierOrder[]>([]);
+  const [selectedOrderId, setSelectedOrderId] =
+    useState<number | null>(null);
+
+  const [paymentMethod, setPaymentMethod] =
+    useState<"cash" | "card" | "other">("cash");
+
+  const [receivedAmount, setReceivedAmount] = useState("");
+  const [search, setSearch] = useState("");
+  const [now, setNow] = useState<number | null>(null);
+
+  useEffect(() => {
+    const loadOrders = () => {
+      const savedOrders = JSON.parse(
+        localStorage.getItem("dinevo-orders") || "[]"
+      );
+
+      setOrders(savedOrders);
+
+      if (selectedOrderId === null) {
+        const firstUnpaid = savedOrders.find(
+          (order: CashierOrder) =>
+            order.paymentStatus !== "paid"
+        );
+
+        if (firstUnpaid) {
+          setSelectedOrderId(firstUnpaid.id);
+        }
+      }
+    };
+
+    loadOrders();
+
+setNow(Date.now());
+
+    const interval = setInterval(() => {
+      setNow(Date.now());
+      loadOrders();
+    }, 1000);
+
+
+    return () => clearInterval(interval);
+  }, [selectedOrderId]);
+
+  const openOrders = useMemo(() => {
+    return orders
+      .filter(
+        (order) =>
+          order.paymentStatus !== "paid"
+      )
+      .filter((order) => {
+        const text =
+          `${order.tableNumber} ${order.orderNumber} ${order.guests
+            .map((guest) => guest.guestName)
+            .join(" ")}`.toLowerCase();
+
+        return text.includes(search.toLowerCase());
+      })
+      .sort(
+        (a, b) =>
+          a.createdAt - b.createdAt
+      );
+  }, [orders, search]);
+
+  const selectedOrder =
+    orders.find(
+      (order) =>
+        order.id === selectedOrderId
+    ) || null;
+
+ const todayPaidOrders = useMemo(() => {
+  if (!now) return [];
+
+  const today = new Date(now);
+
+  return orders
+    .filter(
+      (order) =>
+        order.paymentStatus === "paid" &&
+        order.paidAt
+    )
+    .filter((order) => {
+      const paidDate = new Date(
+        order.paidAt as number
+      );
+
+      return (
+        paidDate.getFullYear() ===
+          today.getFullYear() &&
+        paidDate.getMonth() ===
+          today.getMonth() &&
+        paidDate.getDate() ===
+          today.getDate()
+      );
+    })
+    .sort(
+      (a, b) =>
+        (b.paidAt || 0) -
+        (a.paidAt || 0)
+    );
+}, [orders, now]);
+
+const completePayment = () => {
+  if (!selectedOrder) return;
+
+  const received =
+    Number(receivedAmount) || 0;
+
+  if (
+    paymentMethod === "cash" &&
+    received < selectedOrder.total
+  ) {
+    alert("Received amount is less than the total.");
+    return;
+  }
+
+  const paidAt = Date.now();
+
+  const receiptData: ReceiptData = {
+    orderNumber: selectedOrder.orderNumber,
+    tableNumber: selectedOrder.tableNumber,
+    total: selectedOrder.total,
+    paymentMethod,
+    received:
+      paymentMethod === "cash"
+        ? received
+        : undefined,
+    change:
+      paymentMethod === "cash"
+        ? Math.max(
+            0,
+            received - selectedOrder.total
+          )
+        : undefined,
+    paidAt,
+  };
+
+  const savedOrders = JSON.parse(
+    localStorage.getItem("dinevo-orders") || "[]"
+  );
+
+  const updatedOrders = savedOrders.map(
+    (order: CashierOrder) => {
+      if (order.id !== selectedOrder.id) {
+        return order;
+      }
+
+      return {
+        ...order,
+        paymentStatus: "paid",
+        paymentMethod,
+        paidAt,
+      };
+    }
+  );
+
+  localStorage.setItem(
+    "dinevo-orders",
+    JSON.stringify(updatedOrders)
+  );
+
+  localStorage.setItem(
+    "dinevo-last-receipt",
+    JSON.stringify(receiptData)
+  );
+
+  setOrders(updatedOrders);
+  setReceipt(receiptData);
+
+  const nextUnpaid = updatedOrders.find(
+    (order: CashierOrder) =>
+      order.paymentStatus !== "paid"
+  );
+
+  setSelectedOrderId(
+    nextUnpaid ? nextUnpaid.id : null
+  );
+
+  setReceivedAmount("");
+};
+
+const printSelectedOrder = () => {
+  if (!selectedOrder) {
+    alert("Please select an order first.");
+    return;
+  }
+
+  const status =
+    selectedOrder.paymentStatus === "paid"
+      ? "PAID"
+      : "UNPAID";
+
+  const guestSections = selectedOrder.guests
+    .map((guest) => {
+      const guestTotal = guest.items.reduce(
+        (sum, item) =>
+          sum + item.price * item.quantity,
+        0
+      );
+
+      const items = guest.items
+        .map(
+          (item) => `
+            <div class="item">
+              <span>${item.quantity} × ${item.name}</span>
+              <span>€${(
+                item.price * item.quantity
+              ).toFixed(2)}</span>
+            </div>
+          `
+        )
+        .join("");
+
+      return `
+        <section class="guest">
+          <h3>${guest.guestName}</h3>
+
+          ${items}
+
+          <div class="guest-total">
+            <span>Guest Total</span>
+            <strong>€${guestTotal.toFixed(2)}</strong>
+          </div>
+        </section>
+      `;
+    })
+    .join("");
+
+  const paidInformation =
+    selectedOrder.paymentStatus === "paid"
+      ? `
+        <div class="payment">
+          <div>
+            <span>Payment</span>
+            <strong>
+              ${
+                selectedOrder.paymentMethod
+                  ? selectedOrder.paymentMethod.toUpperCase()
+                  : "-"
+              }
+            </strong>
+          </div>
+
+          ${
+            selectedOrder.paidAt
+              ? `
+                <div>
+                  <span>Paid At</span>
+                  <strong>
+                    ${new Date(
+                      selectedOrder.paidAt
+                    ).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </strong>
+                </div>
+              `
+              : ""
+          }
+        </div>
+      `
+      : `
+        <div class="unpaid">
+          PLEASE PAY AT THE CASH COUNTER
+        </div>
+      `;
+
+  const printWindow = window.open(
+    "",
+    "_blank",
+    "width=420,height=700"
+  );
+
+  if (!printWindow) {
+    alert("Please allow popups to print the slip.");
+    return;
+  }
+
+  printWindow.document.write(`
+    <!DOCTYPE html>
+
+    <html>
+      <head>
+
+        <title>
+          Order #${selectedOrder.orderNumber}
+        </title>
+
+        <style>
+
+          @page {
+            size: 80mm auto;
+            margin: 5mm;
+          }
+
+          body {
+            font-family: Arial, sans-serif;
+            background: white;
+            color: black;
+            margin: 0;
+            padding: 8px;
+            font-size: 12px;
+          }
+
+          .receipt {
+            width: 72mm;
+            margin: auto;
+          }
+
+          .brand {
+            text-align: center;
+            font-size: 24px;
+            font-weight: 900;
+          }
+
+          .subtitle {
+            text-align: center;
+            font-size: 10px;
+            margin-top: 3px;
+          }
+
+          .divider {
+            border-top: 1px dashed black;
+            margin: 12px 0;
+          }
+
+          .top {
+            display: flex;
+            justify-content: space-between;
+          }
+
+          .table {
+            font-size: 28px;
+            font-weight: 900;
+          }
+
+          .order-info {
+            text-align: right;
+            line-height: 1.5;
+          }
+
+          .status {
+            margin: 12px 0;
+            border: 2px solid black;
+            padding: 7px;
+            text-align: center;
+            font-weight: 900;
+          }
+
+          .guest {
+            margin-top: 14px;
+          }
+
+          .guest h3 {
+            margin: 0 0 7px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid black;
+            text-transform: uppercase;
+          }
+
+          .item {
+            display: flex;
+            justify-content: space-between;
+            gap: 15px;
+            padding: 4px 0;
+          }
+
+          .guest-total {
+            display: flex;
+            justify-content: space-between;
+            border-top: 1px dotted #777;
+            margin-top: 6px;
+            padding-top: 6px;
+          }
+
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
+          .total {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 15px;
+            font-size: 20px;
+            font-weight: 900;
+          }
+
+          .payment {
+            border-top: 1px dashed black;
+            margin-top: 12px;
+            padding-top: 10px;
+          }
+
+          .payment div {
+            display: flex;
+            justify-content: space-between;
+            padding: 3px 0;
+          }
+
+          .unpaid {
+            border: 2px solid black;
+            margin-top: 15px;
+            padding: 9px;
+            text-align: center;
+            font-weight: 900;
+          }
+
+          .footer {
+            text-align: center;
+            margin-top: 20px;
+          }
+
+        </style>
+
+      </head>
+
+      <body>
+
+        <div class="receipt">
+
+          <div class="brand">
+            DINEVO
+          </div>
+
+          <div class="subtitle">
+            From Table to Kitchen, Seamlessly.
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="top">
+
+            <div>
+              <div>TABLE</div>
+
+              <div class="table">
+                ${selectedOrder.tableNumber}
+              </div>
+            </div>
+
+            <div class="order-info">
+              <strong>
+                Order #${selectedOrder.orderNumber}
+              </strong>
+
+              <br />
+
+              ${new Date(
+                selectedOrder.createdAt
+              ).toLocaleDateString()}
+
+              <br />
+
+              ${new Date(
+                selectedOrder.createdAt
+              ).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </div>
+
+          </div>
+
+          <div class="status">
+            STATUS: ${status}
+          </div>
+
+          ${guestSections}
+
+<div class="divider"></div>
+
+<div class="summary-row">
+  <span>Subtotal</span>
+  <strong>
+    €${(selectedOrder.total / 1.1).toFixed(2)}
+  </strong>
+</div>
+
+<div class="summary-row">
+  <span>Tax</span>
+  <strong>
+    €${(
+      selectedOrder.total -
+      selectedOrder.total / 1.1
+    ).toFixed(2)}
+  </strong>
+</div>
+
+<div class="divider"></div>
+
+<div class="total">
+  <span>TOTAL</span>
+
+  <span>
+    €${selectedOrder.total.toFixed(2)}
+  </span>
+</div>
+
+<div class="divider"></div>
+
+${paidInformation}
+
+          <div class="footer">
+            <strong>Thank You!</strong>
+
+            <br />
+
+            <small>
+              Powered by DINEVO
+            </small>
+          </div>
+
+        </div>
+
+        <script>
+          window.onload = () => {
+            window.print();
+          };
+
+          window.onafterprint = () => {
+            window.close();
+          };
+        </script>
+
+      </body>
+    </html>
+  `);
+
+  printWindow.document.close();
+};
+  return (
+    <main className="min-h-screen bg-[#0d0f10] text-white">
+
+      {/* HEADER */}
+
+      <header className="flex items-center gap-5 border-b border-white/10 px-5 py-4">
+
+        <div className="min-w-[310px]">
+          <h1 className="text-3xl font-black">
+            DINE
+            <span className="text-red-500">
+              VO
+            </span>
+            <span className="ml-5 text-xl">
+              CASHIER COUNTER
+            </span>
+          </h1>
+        </div>
+
+        <input
+          value={search}
+          onChange={(e) =>
+            setSearch(
+              e.target.value
+            )
+          }
+          placeholder="Search by Table / Order # / Guest Name"
+          className="min-w-0 flex-1 rounded-xl border border-white/10 bg-[#171a1d] px-5 py-3 outline-none"
+        />
+
+        <div className="rounded-xl bg-[#171a1d] px-4 py-3 font-bold">
+          Open Orders{" "}
+          <span className="ml-2 rounded-full bg-red-600 px-2 py-1 text-xs">
+            {openOrders.length}
+          </span>
+        </div>
+
+        <div className="rounded-xl bg-[#171a1d] px-4 py-3 text-center">
+          <p className="font-bold">
+            {now
+  ? new Date(now).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  : "--:--"}
+          </p>
+
+          <p className="text-xs text-gray-400">
+            {now
+  ? new Date(now).toLocaleDateString()
+  : "--/--/----"}
+          </p>
+        </div>
+
+      </header>
+
+      {/* MAIN GRID */}
+
+      <section className="grid grid-cols-[290px_minmax(0,1fr)_390px] gap-4 p-4">
+
+        {/* LEFT OPEN ORDERS */}
+
+        <aside className="rounded-2xl border border-white/10 bg-[#131619] p-4">
+
+          <div className="mb-4 flex items-center justify-between">
+
+            <h2 className="font-black">
+              OPEN ORDERS
+            </h2>
+
+            <span className="rounded-lg bg-[#202428] px-3 py-2 text-xs">
+              Oldest First
+            </span>
+
+          </div>
+
+          <div className="space-y-3">
+
+            {openOrders.map((order) => {
+
+              const isSelected =
+                order.id ===
+                selectedOrderId;
+
+              return (
+
+                <button
+                  key={order.id}
+                  onClick={() => {
+                    setSelectedOrderId(
+                      order.id
+                    );
+
+                    setReceivedAmount("");
+                  }}
+                  className={`w-full rounded-xl border p-4 text-left ${
+                    isSelected
+                      ? "border-red-500 bg-red-500/10"
+                      : "border-white/5 bg-[#1b1f22]"
+                  }`}
+                >
+
+                  <div className="flex justify-between">
+
+                    <div>
+
+                      <p className="font-bold">
+                        Order #
+                        {
+                          order.orderNumber
+                        }
+                      </p>
+
+                      <p className="mt-1 text-sm text-gray-400">
+                        Table{" "}
+                        {
+                          order.tableNumber
+                        }
+                      </p>
+
+                    </div>
+
+                    <div className="text-right">
+
+                      <p className="font-black">
+                        €
+                        {order.total.toFixed(
+                          2
+                        )}
+                      </p>
+
+                      <p className="mt-1 text-xs text-blue-400">
+                        UNPAID
+                      </p>
+
+                    </div>
+
+                  </div>
+
+                </button>
+
+              );
+            })}
+
+          </div>
+
+          <div className="mt-5 border-t border-white/10 pt-4 text-sm text-gray-400">
+            Total Open Orders:
+            <span className="ml-2 font-bold text-white">
+              {openOrders.length}
+            </span>
+          </div>
+
+        </aside>
+
+        {/* CENTER ORDER DETAILS */}
+
+        <section className="rounded-2xl border border-white/10 bg-[#131619] p-5">
+
+          {!selectedOrder ? (
+
+            <div className="flex min-h-[500px] items-center justify-center text-gray-500">
+              Select an open order.
+            </div>
+
+          ) : (
+
+            <>
+
+              <div className="flex items-start justify-between border-b border-white/10 pb-5">
+
+                <div>
+
+                  <p className="text-sm text-gray-400">
+                    TABLE
+                  </p>
+
+                  <h2 className="text-5xl font-black">
+                    {
+                      selectedOrder.tableNumber
+                    }
+                  </h2>
+
+                </div>
+
+                <div className="text-right">
+
+  <div className="mb-3 flex items-center justify-end gap-2">
+
+    <span
+      className={`rounded-lg px-3 py-2 text-xs font-black ${
+        selectedOrder.paymentStatus === "paid"
+          ? "bg-green-500/15 text-green-500"
+          : "bg-blue-500/15 text-blue-400"
+      }`}
+    >
+      {selectedOrder.paymentStatus === "paid"
+        ? "PAID"
+        : "UNPAID"}
+    </span>
+
+    <button
+      onClick={printSelectedOrder}
+      className="rounded-lg border border-white/10 bg-[#1a1e21] px-3 py-2 text-xs font-bold hover:bg-[#24282c]"
+    >
+      🖨{" "}
+      {selectedOrder.paymentStatus === "paid"
+        ? "Reprint Slip"
+        : "Print Slip"}
+    </button>
+
+  </div>
+
+  <p className="text-2xl font-bold">
+    Order #{selectedOrder.orderNumber}
+  </p>
+
+  <p className="mt-1 text-sm text-gray-400">
+    {selectedOrder.guests.length} Guests
+  </p>
+
+</div>
+
+              </div>
+
+              <div className="mt-5 space-y-4">
+
+                {selectedOrder.guests.map(
+                  (guest, guestIndex) => {
+
+                    const guestTotal =
+                      guest.items.reduce(
+                        (
+                          sum,
+                          item
+                        ) =>
+                          sum +
+                          item.price *
+                            item.quantity,
+                        0
+                      );
+
+                    return (
+
+                      <div
+                        key={`${guest.guestName}-${guestIndex}`}
+                        className="rounded-xl border border-white/10 bg-[#1a1e21]"
+                      >
+
+                        <div className="border-b border-white/10 px-4 py-3 font-bold text-red-400">
+                          {
+                            guest.guestName
+                          }
+                        </div>
+
+                        <div className="p-4">
+
+                          {guest.items.map(
+                            (item) => (
+
+                              <div
+                                key={item.id}
+                                className="flex justify-between py-2"
+                              >
+
+                                <div className="flex gap-3">
+
+                                  <span>
+                                    {
+                                      item.quantity
+                                    }
+                                  </span>
+
+                                  <span>
+                                    {
+                                      item.name
+                                    }
+                                  </span>
+
+                                </div>
+
+                                <strong>
+                                  €
+                                  {(
+                                    item.price *
+                                    item.quantity
+                                  ).toFixed(
+                                    2
+                                  )}
+                                </strong>
+
+                              </div>
+
+                            )
+                          )}
+
+                          <div className="mt-3 flex justify-between border-t border-white/10 pt-3">
+
+                            <span className="text-sm text-gray-400">
+                              Guest Total
+                            </span>
+
+                            <strong className="text-red-400">
+                              €
+                              {guestTotal.toFixed(
+                                2
+                              )}
+                            </strong>
+
+                          </div>
+
+                        </div>
+
+                      </div>
+
+                    );
+                  }
+                )}
+
+              </div>
+
+              <div className="mt-6 flex justify-between border-t border-white/10 pt-5">
+
+                <span className="text-xl font-bold">
+                  TOTAL AMOUNT
+                </span>
+
+                <span className="text-3xl font-black">
+                  €
+                  {selectedOrder.total.toFixed(
+                    2
+                  )}
+                </span>
+
+              </div>
+
+            </>
+
+          )}
+
+        </section>
+
+        {/* RIGHT PAYMENT */}
+
+        <aside className="rounded-2xl border border-white/10 bg-[#131619] p-5">
+
+          <h2 className="text-xl font-black">
+            PAYMENT
+          </h2>
+
+          <p className="mt-6 text-sm text-gray-400">
+            Payment Method
+          </p>
+
+          <div className="mt-3 grid grid-cols-3 gap-3">
+
+            {[
+              "cash",
+              "card",
+              "other",
+            ].map((method) => (
+
+              <button
+                key={method}
+                onClick={() =>
+                  setPaymentMethod(
+                    method as
+                      | "cash"
+                      | "card"
+                      | "other"
+                  )
+                }
+                className={`rounded-xl border py-5 font-bold capitalize ${
+                  paymentMethod ===
+                  method
+                    ? "border-green-500 bg-green-500/10"
+                    : "border-white/10 bg-[#1a1e21]"
+                }`}
+              >
+                {method}
+              </button>
+
+            ))}
+
+          </div>
+
+          <div className="mt-7 rounded-xl bg-[#1a1e21] p-5">
+
+            <div className="flex justify-between">
+
+              <span>
+                Subtotal
+              </span>
+
+              <strong>
+                €
+               {selectedOrder
+  ? (selectedOrder.total / 1.1).toFixed(2)
+  : "0.00"}
+              </strong>
+
+            </div>
+
+            <div className="mt-3 flex justify-between text-gray-400">
+
+  <span>
+    Tax (10%)
+  </span>
+
+  <span>
+    €
+    {selectedOrder
+      ? (
+          selectedOrder.total -
+          selectedOrder.total / 1.1
+        ).toFixed(2)
+      : "0.00"}
+  </span>
+
+</div>
+
+            <div className="mt-5 flex justify-between border-t border-white/10 pt-5">
+
+              <strong className="text-xl">
+                TOTAL
+              </strong>
+
+              <strong className="text-3xl text-green-500">
+                €
+                {selectedOrder
+  ? selectedOrder.total.toFixed(2)
+  : "0.00"}
+              </strong>
+
+            </div>
+
+          </div>
+
+          {paymentMethod === "cash" && (
+
+            <>
+
+              <p className="mt-6 text-sm text-gray-400">
+                Received Amount
+              </p>
+
+              <input
+                type="number"
+                value={receivedAmount}
+                onChange={(e) =>
+                  setReceivedAmount(
+                    e.target.value
+                  )
+                }
+                placeholder="0.00"
+                className="mt-2 w-full rounded-xl border border-white/10 bg-[#1a1e21] px-5 py-4 text-xl outline-none"
+              />
+
+              <div className="mt-5 flex justify-between border-t border-white/10 pt-5">
+
+                <span>
+                  Change
+                </span>
+
+                <strong className="text-2xl text-green-500">
+                  €
+                  {selectedOrder && selectedOrder.paymentMethod === "cash"
+  ? (selectedOrder.change || 0).toFixed(2)
+  : "0.00"}
+                </strong>
+
+              </div>
+
+            </>
+
+          )}
+
+          <button
+            onClick={completePayment}
+            disabled={!selectedOrder}
+            className="mt-7 w-full rounded-xl bg-green-600 py-4 text-lg font-black hover:bg-green-700 disabled:bg-gray-700"
+          >
+            ✓ COMPLETE PAYMENT
+          </button>
+
+        </aside>
+
+      </section>
+
+      {/* BOTTOM */}
+
+      <section className="grid grid-cols-[290px_minmax(0,1fr)] gap-4 px-4 pb-4">
+
+        {/* QUICK ACTIONS */}
+
+      {/* QUICK ACTIONS */}
+
+<div className="rounded-2xl border border-white/10 bg-[#131619] p-4">
+
+  <h3 className="font-bold">
+    QUICK ACTIONS
+  </h3>
+
+  <div className="mt-4 grid grid-cols-3 gap-2">
+
+    <button
+      onClick={() =>
+        router.push("/cashier/manual-order")
+      }
+      className="rounded-xl bg-[#1a1e21] p-4 text-xs"
+    >
+      Manual Order
+    </button>
+
+    <button
+      onClick={printSelectedOrder}
+      disabled={!selectedOrder}
+      className="rounded-xl bg-[#1a1e21] p-4 text-xs disabled:opacity-40"
+    >
+      Print Selected
+    </button>
+
+    <button
+      className="rounded-xl bg-[#1a1e21] p-4 text-xs"
+    >
+      Hold Order
+    </button>
+
+  </div>
+
+</div>
+
+        {/* TODAY'S PAID ORDERS */}
+
+        <div className="rounded-2xl border border-green-500/20 bg-[#131619] p-4">
+
+          <div className="flex items-center justify-between">
+
+            <div>
+
+              <h3 className="font-bold text-green-500">
+                TODAY'S PAID ORDERS
+              </h3>
+
+              <p className="mt-1 text-xs text-gray-500">
+                Only payments completed today appear here.
+              </p>
+
+            </div>
+
+            <span className="text-sm text-gray-400">
+              {
+                todayPaidOrders.length
+              }{" "}
+              Paid
+            </span>
+
+          </div>
+
+          <div className="mt-4 flex gap-3 overflow-x-auto">
+
+            {todayPaidOrders.length ===
+            0 ? (
+
+              <div className="rounded-xl bg-[#1a1e21] px-5 py-4 text-sm text-gray-500">
+                No paid orders yet today.
+              </div>
+
+            ) : (
+
+              todayPaidOrders.map(
+                (order) => (
+
+                  <button
+  key={order.id}
+  onClick={() => {
+    setSelectedOrderId(order.id);
+    setReceivedAmount("");
+  }}
+  className={`min-w-[210px] rounded-xl p-4 text-left ${
+    selectedOrderId === order.id
+      ? "border border-green-500 bg-green-500/10"
+      : "bg-[#1a1e21]"
+  }`}
+>
+
+                    <div className="flex justify-between">
+
+                      <strong>
+                        Table{" "}
+                        {
+                          order.tableNumber
+                        }
+                      </strong>
+
+                      <span className="text-green-500">
+                        PAID
+                      </span>
+
+                    </div>
+
+                    <p className="mt-2 text-sm text-gray-400">
+                      Order #
+                      {
+                        order.orderNumber
+                      }
+                    </p>
+
+<span
+  className={`mt-3 inline-block rounded-lg px-3 py-1 text-xs font-black uppercase ${
+    order.paymentMethod === "cash"
+      ? "bg-green-500/15 text-green-400"
+      : order.paymentMethod === "card"
+      ? "bg-blue-500/15 text-blue-400"
+      : "bg-purple-500/15 text-purple-400"
+  }`}
+>
+  {order.paymentMethod || "Unknown"}
+</span>
+
+                    <div className="mt-3 flex justify-between">
+
+                      <strong>
+                        €
+                        {order.total.toFixed(
+                          2
+                        )}
+                      </strong>
+
+                      <span className="text-xs text-gray-500">
+                        {new Date(
+                          order.paidAt as number
+                        ).toLocaleTimeString(
+                          [],
+                          {
+                            hour: "2-digit",
+                            minute:
+                              "2-digit",
+                          }
+                        )}
+                      </span>
+
+                    </div>
+
+                  </button>
+
+                )
+              )
+
+            )}
+
+          </div>
+
+        </div>
+
+      </section>
+
+{receipt && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+
+    <div className="w-full max-w-md rounded-3xl bg-white p-7 text-black shadow-2xl">
+
+      <div className="text-center">
+
+        <p className="text-sm font-bold text-red-600">
+          DINEVO
+        </p>
+
+        <h2 className="mt-2 text-2xl font-black">
+          Payment Complete
+        </h2>
+
+        <p className="mt-2 text-sm text-gray-500">
+          Receipt for Order #{receipt.orderNumber}
+        </p>
+
+      </div>
+
+      <div className="mt-6 space-y-3 rounded-2xl bg-gray-100 p-5">
+
+        <div className="flex justify-between">
+          <span>Table</span>
+          <strong>
+            {receipt.tableNumber}
+          </strong>
+        </div>
+
+        <div className="flex justify-between">
+          <span>Payment Method</span>
+          <strong className="capitalize">
+            {receipt.paymentMethod}
+          </strong>
+        </div>
+
+        <div className="flex justify-between">
+          <span>Total Paid</span>
+          <strong>
+            €{receipt.total.toFixed(2)}
+          </strong>
+        </div>
+
+        {receipt.paymentMethod === "cash" && (
+          <>
+            <div className="flex justify-between">
+              <span>Received</span>
+              <strong>
+                €{(receipt.received || 0).toFixed(2)}
+              </strong>
+            </div>
+
+            <div className="flex justify-between">
+              <span>Change</span>
+              <strong className="text-green-600">
+                €{(receipt.change || 0).toFixed(2)}
+              </strong>
+            </div>
+          </>
+        )}
+
+        <div className="flex justify-between">
+          <span>Time</span>
+          <strong>
+            {new Date(receipt.paidAt).toLocaleTimeString(
+              [],
+              {
+                hour: "2-digit",
+                minute: "2-digit",
+              }
+            )}
+          </strong>
+        </div>
+
+      </div>
+
+      <div className="mt-6 flex gap-3">
+
+        <button
+          onClick={() => window.print()}
+          className="flex-1 rounded-xl bg-black py-3 font-bold text-white"
+        >
+          Print Receipt
+        </button>
+
+        <button
+          onClick={() => setReceipt(null)}
+          className="flex-1 rounded-xl bg-green-600 py-3 font-bold text-white"
+        >
+          Close
+        </button>
+
+      </div>
+
+    </div>
+
+  </div>
+)}
+
+    </main>
+  );
+}
