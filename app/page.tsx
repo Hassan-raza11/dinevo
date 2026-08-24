@@ -525,7 +525,7 @@ export default function Home() {
                       )
                     }
                     placeholder="Guest name"
-                    className="rounded-xl border px-4 py-3"
+                    className="rounded-xl border-2 border-black bg-white px-4 py-3 font-semibold text-black placeholder:text-gray-500 outline-none focus:border-red-600"
                   />
 
                   <button
@@ -681,20 +681,20 @@ export default function Home() {
                     setSelectedPerson(index);
                     setViewingGuestOrder(index);
                   }}
-                  className={`w-full rounded-lg px-3 py-3 text-left ${
-                    selectedPerson === index
-                      ? "bg-red-600"
-                      : "bg-[#232427]"
-                  }`}
+                  className={`w-full rounded-lg border-2 px-3 py-3 text-left transition ${
+  selectedPerson === index
+    ? "border-white bg-red-600 text-white"
+    : "border-white/60 bg-[#232427] text-white hover:border-white"
+}`}
                 >
 
                   <p className="text-sm font-bold">
                     {person}
                   </p>
 
-                  <p className="mt-1 text-[10px] text-gray-400">
-                    {count} items
-                  </p>
+                  <p className="mt-1 text-xs font-bold text-white">
+  {count} {count === 1 ? "item" : "items"}
+</p>
 
                 </button>
 
