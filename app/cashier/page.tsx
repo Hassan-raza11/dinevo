@@ -3,6 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
+type PaymentPart = {
+  id: number;
+  method: "cash" | "card" | "ticket" | "other";
+  amount: number;
+  ticketCode?: string;
+};
 
 type ReceiptData = {
   orderNumber: string;
@@ -27,6 +33,8 @@ type GuestOrder = {
 };
 
 type CashierOrder = {
+
+  
   id: number;
   orderNumber: string;
   tableNumber: string;
@@ -35,6 +43,7 @@ type CashierOrder = {
   total: number;
   paymentStatus?: "unpaid" | "paid";
   paymentMethod?: "cash" | "card" | "other";
+  paymentBreakdown?: PaymentPart[];
   paidAt?: number;
   received?: number;
 change?: number;
@@ -42,6 +51,15 @@ change?: number;
 
 export default function CashierPage() {
 
+  const [paymentParts, setPaymentParts] = useState<PaymentPart[]>([]);
+
+const [newPaymentMethod, setNewPaymentMethod] =
+  useState<"cash" | "card" | "ticket" | "other">("cash");
+
+const [newPaymentAmount, setNewPaymentAmount] = useState("");
+
+const [ticketCode, setTicketCode] = useState("");
+const [showTicketScanner, setShowTicketScanner] = useState(false);
     const [receipt, setReceipt] = useState<ReceiptData | null>(null);
     const router = useRouter();
   const [orders, setOrders] = useState<CashierOrder[]>([]);
@@ -149,37 +167,30 @@ setNow(Date.now());
 const completePayment = () => {
   if (!selectedOrder) return;
 
-  const received =
-    Number(receivedAmount) || 0;
+  if (paymentParts.length === 0) {
+    alert("Please add at least one payment.");
+    return;
+  }
 
-  if (
-    paymentMethod === "cash" &&
-    received < selectedOrder.total
-  ) {
-    alert("Received amount is less than the total.");
+  const totalPaid = paymentParts.reduce(
+    (sum, part) => sum + part.amount,
+    0
+  );
+
+  const difference =
+    selectedOrder.total - totalPaid;
+
+  if (Math.abs(difference) > 0.01) {
+    alert(
+      `Payment is incomplete. Remaining amount: €${Math.max(
+        0,
+        difference
+      ).toFixed(2)}`
+    );
     return;
   }
 
   const paidAt = Date.now();
-
-  const receiptData: ReceiptData = {
-    orderNumber: selectedOrder.orderNumber,
-    tableNumber: selectedOrder.tableNumber,
-    total: selectedOrder.total,
-    paymentMethod,
-    received:
-      paymentMethod === "cash"
-        ? received
-        : undefined,
-    change:
-      paymentMethod === "cash"
-        ? Math.max(
-            0,
-            received - selectedOrder.total
-          )
-        : undefined,
-    paidAt,
-  };
 
   const savedOrders = JSON.parse(
     localStorage.getItem("dinevo-orders") || "[]"
@@ -194,7 +205,7 @@ const completePayment = () => {
       return {
         ...order,
         paymentStatus: "paid",
-        paymentMethod,
+        paymentBreakdown: paymentParts,
         paidAt,
       };
     }
@@ -205,13 +216,20 @@ const completePayment = () => {
     JSON.stringify(updatedOrders)
   );
 
+  const receiptData = {
+    orderNumber: selectedOrder.orderNumber,
+    tableNumber: selectedOrder.tableNumber,
+    total: selectedOrder.total,
+    paymentBreakdown: paymentParts,
+    paidAt,
+  };
+
   localStorage.setItem(
     "dinevo-last-receipt",
     JSON.stringify(receiptData)
   );
 
   setOrders(updatedOrders);
-  setReceipt(receiptData);
 
   const nextUnpaid = updatedOrders.find(
     (order: CashierOrder) =>
@@ -222,7 +240,9 @@ const completePayment = () => {
     nextUnpaid ? nextUnpaid.id : null
   );
 
-  setReceivedAmount("");
+  setPaymentParts([]);
+  setNewPaymentAmount("");
+  setTicketCode("");
 };
 
 const printSelectedOrder = () => {
@@ -271,27 +291,57 @@ const printSelectedOrder = () => {
       `;
     })
     .join("");
+const paidInformation =
+  selectedOrder.paymentStatus === "paid"
+    ? `
+      <div class="payment-section">
+        <div class="payment-title">Payment</div>
 
-  const paidInformation =
-    selectedOrder.paymentStatus === "paid"
-      ? `
-        <div class="payment">
-          <div>
-            <span>Payment</span>
-            <strong>
-              ${
-                selectedOrder.paymentMethod
-                  ? selectedOrder.paymentMethod.toUpperCase()
-                  : "-"
-              }
-            </strong>
-          </div>
+        ${
+          selectedOrder.paymentBreakdown &&
+          selectedOrder.paymentBreakdown.length > 0
+            ? selectedOrder.paymentBreakdown
+                .map(
+                  (part) => `
+                    <div class="payment-row">
+                      <span>
+                        ${
+                          part.method === "ticket"
+                            ? "Ticket Restaurant"
+                            : part.method.toUpperCase()
+                        }
+                      </span>
 
-          ${
-            selectedOrder.paidAt
-              ? `
-                <div>
+                      <strong>
+                        €${part.amount.toFixed(2)}
+                      </strong>
+                    </div>
+                  `
+                )
+                .join("")
+            : `
+                <div class="payment-row">
+                  <span>
+                    ${
+                      selectedOrder.paymentMethod
+                        ? selectedOrder.paymentMethod.toUpperCase()
+                        : "-"
+                    }
+                  </span>
+
+                  <strong>
+                    €${selectedOrder.total.toFixed(2)}
+                  </strong>
+                </div>
+              `
+        }
+
+        ${
+          selectedOrder.paidAt
+            ? `
+                <div class="payment-row paid-time">
                   <span>Paid At</span>
+
                   <strong>
                     ${new Date(
                       selectedOrder.paidAt
@@ -302,16 +352,11 @@ const printSelectedOrder = () => {
                   </strong>
                 </div>
               `
-              : ""
-          }
-        </div>
-      `
-      : `
-        <div class="unpaid">
-          PLEASE PAY AT THE CASH COUNTER
-        </div>
-      `;
-
+            : ""
+        }
+      </div>
+    `
+    : "";
   const printWindow = window.open(
     "",
     "_blank",
@@ -459,6 +504,40 @@ const printSelectedOrder = () => {
             margin-top: 20px;
           }
 
+          .payment-section {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px dashed black;
+}
+
+.payment-title {
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.payment-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  margin: 7px 0;
+  font-size: 12px;
+}
+
+.payment-row span {
+  text-align: left;
+}
+
+.payment-row strong {
+  text-align: right;
+}
+
+.paid-time {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed #777;
+}
+
         </style>
 
       </head>
@@ -576,6 +655,63 @@ ${paidInformation}
   `);
 
   printWindow.document.close();
+};
+
+const paidAmount = paymentParts.reduce(
+  (sum, part) => sum + part.amount,
+  0
+);
+
+const remainingAmount = Math.max(
+  0,
+  (selectedOrder?.total || 0) - paidAmount
+);
+const addPaymentPart = () => {
+  if (!selectedOrder) return;
+
+  const amount = Number(newPaymentAmount);
+
+  if (!amount || amount <= 0) {
+    alert("Please enter a valid amount.");
+    return;
+  }
+
+  if (amount > remainingAmount + 0.001) {
+    alert("Amount cannot be greater than the remaining balance.");
+    return;
+  }
+
+  if (
+    newPaymentMethod === "ticket" &&
+    !ticketCode.trim()
+  ) {
+    alert("Please scan or enter the Ticket Restaurant code.");
+    return;
+  }
+
+  const newPart: PaymentPart = {
+    id: Date.now(),
+    method: newPaymentMethod,
+    amount,
+    ticketCode:
+      newPaymentMethod === "ticket"
+        ? ticketCode.trim()
+        : undefined,
+  };
+
+  setPaymentParts((current) => [
+    ...current,
+    newPart,
+  ]);
+
+  setNewPaymentAmount("");
+  setTicketCode("");
+  setShowTicketScanner(false);
+};
+const removePaymentPart = (id: number) => {
+  setPaymentParts((current) =>
+    current.filter((part) => part.id !== id)
+  );
 };
   return (
     <main className="min-h-screen bg-[#0d0f10] text-white">
@@ -926,43 +1062,184 @@ ${paidInformation}
           <h2 className="text-xl font-black">
             PAYMENT
           </h2>
+<p className="mt-6 text-sm text-gray-400">
+  Add Payment
+</p>
 
-          <p className="mt-6 text-sm text-gray-400">
-            Payment Method
+<div className="mt-3 grid grid-cols-4 gap-2">
+
+  {[
+    { value: "cash", label: "Cash", icon: "💵" },
+    { value: "card", label: "Card", icon: "💳" },
+    { value: "ticket", label: "Ticket", icon: "🎫" },
+    { value: "other", label: "Other", icon: "•••" },
+  ].map((method) => (
+
+    <button
+      key={method.value}
+      onClick={() => {
+        setNewPaymentMethod(
+          method.value as
+            | "cash"
+            | "card"
+            | "ticket"
+            | "other"
+        );
+
+        if (method.value === "ticket") {
+          setShowTicketScanner(true);
+        } else {
+          setShowTicketScanner(false);
+        }
+      }}
+      className={`rounded-xl border px-2 py-4 text-center transition ${
+        newPaymentMethod === method.value
+          ? "border-green-500 bg-green-500/10"
+          : "border-white/10 bg-[#1a1e21]"
+      }`}
+    >
+
+      <div className="text-xl">
+        {method.icon}
+      </div>
+
+      <div className="mt-1 text-xs font-bold">
+        {method.label}
+      </div>
+
+    </button>
+
+  ))}
+
+</div>
+
+<div className="mt-5">
+
+  <label className="text-sm text-gray-400">
+    Amount
+  </label>
+
+  <div className="mt-2 flex gap-2">
+
+    <input
+      type="number"
+      min="0"
+      step="0.01"
+      value={newPaymentAmount}
+      onChange={(e) =>
+        setNewPaymentAmount(e.target.value)
+      }
+      placeholder={`Remaining €${remainingAmount.toFixed(2)}`}
+      className="min-w-0 flex-1 rounded-xl border border-white/10 bg-[#1a1e21] px-4 py-3 text-lg outline-none focus:border-green-500"
+    />
+
+    <button
+      onClick={() =>
+        setNewPaymentAmount(
+          remainingAmount.toFixed(2)
+        )
+      }
+      className="rounded-xl border border-white/10 bg-[#1a1e21] px-4 text-xs font-bold"
+    >
+      FULL
+    </button>
+
+  </div>
+
+</div>
+{newPaymentMethod === "ticket" && (
+  <div className="mt-4 rounded-xl border border-white/10 bg-[#1a1e21] p-4">
+    <p className="text-sm font-bold text-white">
+      Ticket Restaurant
+    </p>
+
+    <div className="mt-3 flex gap-2">
+      <input
+        type="text"
+        value={ticketCode}
+        onChange={(e) => setTicketCode(e.target.value)}
+        placeholder="Scan or enter barcode"
+        className="min-w-0 flex-1 rounded-xl border border-white/10 bg-[#0d0f10] px-4 py-3 text-white outline-none"
+      />
+
+      <button
+        type="button"
+        onClick={() => setShowTicketScanner(true)}
+        className="rounded-xl bg-white px-4 py-3 font-bold text-black"
+      >
+        📷 Scan
+      </button>
+    </div>
+  </div>
+)}
+
+<button
+  onClick={addPaymentPart}
+  disabled={!selectedOrder || remainingAmount <= 0}
+  className="mt-4 w-full rounded-xl bg-red-600 px-4 py-3 font-bold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+>
+  + ADD PAYMENT
+</button>
+
+<div className="mt-6 space-y-2">
+  {paymentParts.map((part) => (
+    <div
+      key={part.id}
+      className="flex items-center justify-between rounded-xl bg-[#1a1e21] p-3"
+    >
+      <div>
+        <p className="text-sm font-bold capitalize">
+          {part.method === "ticket"
+            ? "🎫 Ticket Restaurant"
+            : part.method}
+        </p>
+
+        {part.ticketCode && (
+          <p className="mt-1 text-[10px] text-gray-500">
+            Code: {part.ticketCode}
           </p>
+        )}
+      </div>
 
-          <div className="mt-3 grid grid-cols-3 gap-3">
+      <div className="flex items-center gap-3">
+        <strong>
+          €{part.amount.toFixed(2)}
+        </strong>
 
-            {[
-              "cash",
-              "card",
-              "other",
-            ].map((method) => (
+        <button
+          onClick={() => removePaymentPart(part.id)}
+          className="text-xs font-bold text-red-500"
+        >
+          ✕
+        </button>
+      </div>
+    </div>
+  ))}
+</div>
 
-              <button
-                key={method}
-                onClick={() =>
-                  setPaymentMethod(
-                    method as
-                      | "cash"
-                      | "card"
-                      | "other"
-                  )
-                }
-                className={`rounded-xl border py-5 font-bold capitalize ${
-                  paymentMethod ===
-                  method
-                    ? "border-green-500 bg-green-500/10"
-                    : "border-white/10 bg-[#1a1e21]"
-                }`}
-              >
-                {method}
-              </button>
+{paymentParts.length > 0 && (
+  <div className="mt-4 rounded-xl border border-white/10 bg-[#1a1e21] p-4">
+    <div className="flex items-center justify-between text-sm">
+      <span className="text-gray-400">Paid</span>
+      <span className="font-bold text-green-400">
+        €{paidAmount.toFixed(2)}
+      </span>
+    </div>
 
-            ))}
-
-          </div>
-
+    <div className="mt-3 flex items-center justify-between">
+      <span className="font-bold text-white">Remaining</span>
+      <span
+        className={`text-lg font-black ${
+          remainingAmount <= 0
+            ? "text-green-400"
+            : "text-red-500"
+        }`}
+      >
+        €{remainingAmount.toFixed(2)}
+      </span>
+    </div>
+  </div>
+)}
           <div className="mt-7 rounded-xl bg-[#1a1e21] p-5">
 
             <div className="flex justify-between">
@@ -1185,17 +1462,30 @@ ${paidInformation}
                       }
                     </p>
 
-<span
-  className={`mt-3 inline-block rounded-lg px-3 py-1 text-xs font-black uppercase ${
-    order.paymentMethod === "cash"
-      ? "bg-green-500/15 text-green-400"
-      : order.paymentMethod === "card"
-      ? "bg-blue-500/15 text-blue-400"
-      : "bg-purple-500/15 text-purple-400"
-  }`}
->
-  {order.paymentMethod || "Unknown"}
-</span>
+<div className="mt-3 space-y-1">
+  {order.paymentBreakdown && order.paymentBreakdown.length > 0 ? (
+    order.paymentBreakdown.map((part) => (
+      <div
+        key={part.id}
+        className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2 text-xs"
+      >
+        <span className="font-bold capitalize text-gray-300">
+          {part.method === "ticket"
+            ? "Ticket Restaurant"
+            : part.method}
+        </span>
+
+        <span className="font-black text-white">
+          €{part.amount.toFixed(2)}
+        </span>
+      </div>
+    ))
+  ) : (
+    <span className="inline-block rounded-lg bg-white/5 px-3 py-1 text-xs font-black uppercase text-gray-300">
+      {order.paymentMethod || "Unknown"}
+    </span>
+  )}
+</div>
 
                     <div className="mt-3 flex justify-between">
 
