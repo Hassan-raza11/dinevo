@@ -38,7 +38,7 @@ export default function KitchenPage() {
       const kitchenOrders: KitchenOrder[] = savedOrders
   .filter(
     (order: any) =>
-      order.kitchenCompleted !== true
+      order.kitchenStatus !== "completed"
   )
   .map((order: any) => ({
           id: order.id,
@@ -128,10 +128,11 @@ export default function KitchenPage() {
       };
     });
 
-    localStorage.setItem(
-      "dinevo-orders",
-      JSON.stringify(updatedOrders)
-    );
+   localStorage.setItem(
+  "dinevo-orders",
+  JSON.stringify(updatedOrders)
+);
+
 
     setOrders((currentOrders) =>
       currentOrders.map((order) => {
@@ -170,13 +171,15 @@ const completeOrder = (orderId: number) => {
   );
 
   const updatedOrders = savedOrders.map((order: any) => {
-    if (order.id !== orderId) {
+    if (String(order.id) !== String(orderId)) {
       return order;
     }
 
     return {
       ...order,
+      kitchenStatus: "completed",
       kitchenCompleted: true,
+      kitchenCompletedAt: Date.now(),
     };
   });
 
@@ -187,7 +190,8 @@ const completeOrder = (orderId: number) => {
 
   setOrders((currentOrders) =>
     currentOrders.filter(
-      (order) => order.id !== orderId
+      (order) =>
+        String(order.id) !== String(orderId)
     )
   );
 };
