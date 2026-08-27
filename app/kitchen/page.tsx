@@ -2,6 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+type RestaurantSettings = {
+  restaurantName: string;
+  taxRate: number;
+  preparationTime: number;
+  currency: string;
+  currencySymbol: string;
+};
+
 type KitchenItem = {
   id: number;
   name: string;
@@ -23,11 +31,23 @@ type KitchenOrder = {
   guests: GuestOrder[];
 };
 
+const defaultSettings: RestaurantSettings = {
+  restaurantName: "Dinevo Restaurant",
+  taxRate: 10,
+  preparationTime: 15,
+  currency: "EUR",
+  currencySymbol: "€",
+};
+
 export default function KitchenPage() {
+
+  
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
   const [undoMode, setUndoMode] = useState(false);
   const [now, setNow] = useState(Date.now());
-
+const [settings, setSettings] =
+  useState<RestaurantSettings>(defaultSettings);
+  
   // LOAD REAL ORDERS FROM CUSTOMER SIDE
   useEffect(() => {
     const loadKitchenOrders = () => {
@@ -35,7 +55,16 @@ export default function KitchenPage() {
         localStorage.getItem("dinevo-orders") || "[]"
       );
 
+      const savedSettings = localStorage.getItem(
+  "dinevo-settings"
+);
+
+if (savedSettings) {
+  setSettings(JSON.parse(savedSettings));
+}
+
       const kitchenOrders: KitchenOrder[] = savedOrders
+      
   .filter(
     (order: any) =>
       order.kitchenStatus !== "completed"
@@ -346,12 +375,17 @@ const allItemsCompleted =
               const seconds =
                 elapsedSeconds % 60;
 
-              const timerColor =
-                minutes >= 15
-                  ? "text-red-500"
-                  : minutes >= 10
-                  ? "text-orange-400"
-                  : "text-green-500";
+              const warningTime = Math.max(
+  1,
+  settings.preparationTime - 5
+);
+
+const timerColor =
+  minutes >= settings.preparationTime
+    ? "text-red-500"
+    : minutes >= warningTime
+    ? "text-orange-400"
+    : "text-green-500";
 
               return (
 

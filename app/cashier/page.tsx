@@ -3,6 +3,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
+type RestaurantSettings = {
+  restaurantName: string;
+  taxRate: number;
+  preparationTime: number;
+  currency: string;
+  currencySymbol: string;
+};
+
+const defaultSettings: RestaurantSettings = {
+  restaurantName: "Dinevo Restaurant",
+  taxRate: 10,
+  preparationTime: 15,
+  currency: "EUR",
+  currencySymbol: "€",
+};
+
 type PaymentPart = {
   id: number;
   method: "cash" | "card" | "ticket" | "other";
@@ -49,7 +65,11 @@ type CashierOrder = {
 change?: number;
 };
 
+
 export default function CashierPage() {
+
+const [settings, setSettings] =
+  useState<RestaurantSettings>(defaultSettings);
 
   const [paymentParts, setPaymentParts] = useState<PaymentPart[]>([]);
 
@@ -78,6 +98,13 @@ const [showTicketScanner, setShowTicketScanner] = useState(false);
       const savedOrders = JSON.parse(
         localStorage.getItem("dinevo-orders") || "[]"
       );
+const savedSettings = localStorage.getItem(
+  "dinevo-settings"
+);
+
+if (savedSettings) {
+  setSettings(JSON.parse(savedSettings));
+}
 
       setOrders(savedOrders);
 
@@ -330,7 +357,8 @@ const paidInformation =
                   </span>
 
                   <strong>
-                    €${selectedOrder.total.toFixed(2)}
+                    {settings.currencySymbol}
+{selectedOrder.total.toFixed(2)}
                   </strong>
                 </div>
               `
@@ -547,6 +575,8 @@ const paidInformation =
         <div class="receipt">
 
           <div class="brand">
+  ${settings.restaurantName}
+</div>
             DINEVO
           </div>
 
@@ -600,17 +630,29 @@ const paidInformation =
 <div class="summary-row">
   <span>Subtotal</span>
   <strong>
-    €${(selectedOrder.total / 1.1).toFixed(2)}
-  </strong>
+  {settings.currencySymbol}
+  {selectedOrder
+    ? (
+        selectedOrder.total /
+        (1 + settings.taxRate / 100)
+      ).toFixed(2)
+    : "0.00"}
+</strong>
 </div>
 
 <div class="summary-row">
   <span>Tax</span>
   <strong>
-    €${(
-      selectedOrder.total -
-      selectedOrder.total / 1.1
-    ).toFixed(2)}
+    <span>
+ ${settings.currencySymbol}
+  {selectedOrder
+    ? (
+        selectedOrder.total -
+        selectedOrder.total /
+(1 + settings.taxRate / 100)
+      ).toFixed(2)
+    : "0.00"}
+</span>
   </strong>
 </div>
 
@@ -1129,7 +1171,7 @@ const removePaymentPart = (id: number) => {
       onChange={(e) =>
         setNewPaymentAmount(e.target.value)
       }
-      placeholder={`Remaining €${remainingAmount.toFixed(2)}`}
+      placeholder={`Remaining ${settings.currencySymbol}${remainingAmount.toFixed(2)}`}
       className="min-w-0 flex-1 rounded-xl border border-white/10 bg-[#1a1e21] px-4 py-3 text-lg outline-none focus:border-green-500"
     />
 
@@ -1203,7 +1245,8 @@ const removePaymentPart = (id: number) => {
 
       <div className="flex items-center gap-3">
         <strong>
-          €{part.amount.toFixed(2)}
+          {settings.currencySymbol}
+          {part.amount.toFixed(2)}
         </strong>
 
         <button
@@ -1222,7 +1265,8 @@ const removePaymentPart = (id: number) => {
     <div className="flex items-center justify-between text-sm">
       <span className="text-gray-400">Paid</span>
       <span className="font-bold text-green-400">
-        €{paidAmount.toFixed(2)}
+         {settings.currencySymbol}
+        {paidAmount.toFixed(2)}
       </span>
     </div>
 
@@ -1235,7 +1279,8 @@ const removePaymentPart = (id: number) => {
             : "text-red-500"
         }`}
       >
-        €{remainingAmount.toFixed(2)}
+        {settings.currencySymbol}
+        {remainingAmount.toFixed(2)}
       </span>
     </div>
   </div>
@@ -1251,7 +1296,8 @@ const removePaymentPart = (id: number) => {
               <strong>
                 €
                {selectedOrder
-  ? (selectedOrder.total / 1.1).toFixed(2)
+  ? (selectedOrder.total /
+(1 + settings.taxRate / 100)).toFixed(2)
   : "0.00"}
               </strong>
 
@@ -1282,7 +1328,7 @@ const removePaymentPart = (id: number) => {
               </strong>
 
               <strong className="text-3xl text-green-500">
-                €
+                {settings.currencySymbol}
                 {selectedOrder
   ? selectedOrder.total.toFixed(2)
   : "0.00"}
@@ -1476,7 +1522,8 @@ const removePaymentPart = (id: number) => {
         </span>
 
         <span className="font-black text-white">
-          €{part.amount.toFixed(2)}
+          {settings.currencySymbol}
+          {part.amount.toFixed(2)}
         </span>
       </div>
     ))
