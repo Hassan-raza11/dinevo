@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import StaffGuard from "@/components/StaffGuard";
 
 type PaymentPart = {
   id: number;
@@ -53,7 +55,65 @@ const defaultSettings: RestaurantSettings = {
   currencySymbol: "€",
 };
 
+type MenuCategory = {
+  id: number;
+  name: string;
+  display_order: number;
+  active: boolean;
+};
+
+type MenuAdminItem = {
+  id: number;
+  name: string;
+  description: string | null;
+  price: number;
+  category_id: number | null;
+  image_url: string | null;
+  vegetarian: boolean;
+  station: "kitchen" | "pizza" | "bar";
+  active: boolean;
+  display_order: number;
+};
+
+
 export default function AdminPage() {
+
+const [editingDish, setEditingDish] =
+  useState<MenuAdminItem | null>(null);
+
+const [showAddDish, setShowAddDish] =
+  useState(false);
+
+const [newDishName, setNewDishName] =
+  useState("");
+
+const [newDishDescription, setNewDishDescription] =
+  useState("");
+
+const [newDishPrice, setNewDishPrice] =
+  useState("");
+
+const [newDishCategoryId, setNewDishCategoryId] =
+  useState<number | null>(null);
+
+const [newDishImageUrl, setNewDishImageUrl] =
+  useState("");
+
+const [newDishVegetarian, setNewDishVegetarian] =
+  useState(false);
+
+const [newDishStation, setNewDishStation] =
+  useState<"kitchen" | "pizza" | "bar">("kitchen");
+const [menuCategories, setMenuCategories] =
+  useState<MenuCategory[]>([]);
+
+const [menuItems, setMenuItems] =
+  useState<MenuAdminItem[]>([]);
+
+const [showMenuManagement, setShowMenuManagement] =
+  useState(false);
+
+
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [now, setNow] = useState<number | null>(null);
   const [selectedSalesDay, setSelectedSalesDay] =
@@ -69,39 +129,209 @@ export default function AdminPage() {
 
   // LOAD ORDERS + SETTINGS
   useEffect(() => {
-    const loadData = () => {
-      const savedOrders = JSON.parse(
-        localStorage.getItem("dinevo-orders") || "[]"
-      );
+  const loadOrders = async () => {
+    const { data, error } = await supabase
+      .from("orders")
+      .select(`
+        *,
+        order_guests (
+          id,
+          guest_name,
+          order_items (
+            id,
+            item_name,
+            price,
+            quantity,
+            station
+          )
+        ),
+        payments (
+          id,
+          method,
+          amount
+        )
+      `)
+      .order("created_at", { ascending: false });
 
-      setOrders(savedOrders);
+    if (error) {
+      console.error("Admin Supabase load error:", error);
+      return;
+    }
 
-      const savedSettings = localStorage.getItem(
-        "dinevo-settings"
-      );
+    const formattedOrders = (data || []).map(
+      (order: any) => ({
+        id: order.id,
+        orderNumber: order.order_number,
+        tableNumber: order.table_number,
+        total: Number(order.total),
+        createdAt: new Date(order.created_at).getTime(),
 
-      if (savedSettings) {
-        const parsedSettings = JSON.parse(savedSettings);
+        kitchenStatus: order.kitchen_status,
+        waiterStatus: order.waiter_status,
 
-        setSettings(parsedSettings);
-        setDraftSettings(parsedSettings);
-      }
-    };
+        paymentStatus: order.payment_status,
 
-    loadData();
+        paidAt: order.paid_at
+          ? new Date(order.paid_at).getTime()
+          : undefined,
+
+        paymentBreakdown:
+          order.payments?.map((payment: any) => ({
+            method: payment.method,
+            amount: Number(payment.amount),
+          })) || [],
+
+        guests:
+          order.order_guests?.map((guest: any) => ({
+            guestName: guest.guest_name,
+
+            items:
+              guest.order_items?.map((item: any) => ({
+                id: item.id,
+                name: item.item_name,
+                price: Number(item.price),
+                quantity: item.quantity,
+                station: item.station,
+              })) || [],
+          })) || [],
+      })
+    );
+
+    setOrders(formattedOrders);
     setNow(Date.now());
+  };
 
-    const interval = setInterval(() => {
-      const savedOrders = JSON.parse(
-        localStorage.getItem("dinevo-orders") || "[]"
+  loadOrders();
+
+  const channel = supabase
+    .channel("admin-orders")
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "orders",
+      },
+      () => {
+        loadOrders();
+      }
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "order_guests",
+      },
+      () => {
+        loadOrders();
+      }
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "order_items",
+      },
+      () => {
+        loadOrders();
+      }
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "payments",
+      },
+      () => {
+        loadOrders();
+      }
+    )
+    .subscribe();
+
+  const interval = setInterval(() => {
+    setNow(Date.now());
+  }, 1000);
+
+  return () => {
+    clearInterval(interval);
+    supabase.removeChannel(channel);
+  };
+}, []);
+
+// LOAD MENU FROM SUPABASE
+useEffect(() => {
+  const loadAdminMenu = async () => {
+    const {
+      data: categoryData,
+      error: categoryError,
+    } = await supabase
+      .from("menu_categories")
+      .select("*")
+      .order("display_order", {
+        ascending: true,
+      });
+
+    if (categoryError) {
+      console.error(
+        "Admin menu categories load error:",
+        categoryError
       );
+    } else {
+      setMenuCategories(
+        (categoryData || []).map((item: any) => ({
+          id: Number(item.id),
+          name: item.name,
+          display_order: item.display_order || 0,
+          active: Boolean(item.active),
+        }))
+      );
+    }
 
-      setOrders(savedOrders);
-      setNow(Date.now());
-    }, 1000);
+    const {
+      data: itemData,
+      error: itemError,
+    } = await supabase
+      .from("menu_items")
+      .select("*")
+      .order("display_order", {
+        ascending: true,
+      });
 
-    return () => clearInterval(interval);
-  }, []);
+    if (itemError) {
+      console.error(
+        "Admin menu items load error:",
+        itemError
+      );
+    } else {
+      setMenuItems(
+        (itemData || []).map((item: any) => ({
+          id: Number(item.id),
+          name: item.name,
+          description: item.description,
+          price: Number(item.price),
+          category_id: item.category_id
+            ? Number(item.category_id)
+            : null,
+          image_url: item.image_url,
+          vegetarian: Boolean(item.vegetarian),
+          station:
+            item.station === "pizza" ||
+            item.station === "bar"
+              ? item.station
+              : "kitchen",
+          active: Boolean(item.active),
+          display_order: item.display_order || 0,
+        }))
+      );
+    }
+  };
+
+  loadAdminMenu();
+}, []);
+
 
   // TODAY'S ORDERS
   const todayOrders = useMemo(() => {
@@ -132,7 +362,29 @@ export default function AdminPage() {
     (sum, order) => sum + order.total,
     0
   );
+const todayPaymentBreakdown = paidOrders.reduce(
+  (totals, order) => {
+    order.paymentBreakdown?.forEach((payment) => {
+      if (payment.method === "cash") {
+        totals.cash += payment.amount;
+      } else if (payment.method === "card") {
+        totals.card += payment.amount;
+      } else if (payment.method === "ticket") {
+        totals.ticket += payment.amount;
+      } else {
+        totals.other += payment.amount;
+      }
+    });
 
+    return totals;
+  },
+  {
+    cash: 0,
+    card: 0,
+    ticket: 0,
+    other: 0,
+  }
+);
   const todayItemSales = useMemo(() => {
   const salesMap: Record<
     string,
@@ -384,7 +636,7 @@ const selectedDayReport = useMemo(() => {
   };
 
   // SAVE SETTINGS
-  const saveSettings = () => {
+  const saveSettings = async () => {
     if (!draftSettings.restaurantName.trim()) {
       alert("Please enter the restaurant name.");
       return;
@@ -408,12 +660,175 @@ const selectedDayReport = useMemo(() => {
       JSON.stringify(draftSettings)
     );
 
+const { error } = await supabase
+  .from("restaurant_settings")
+  .update({
+    restaurant_name: draftSettings.restaurantName,
+    tax_rate: draftSettings.taxRate,
+    preparation_time: draftSettings.preparationTime,
+    currency: draftSettings.currency,
+    currency_symbol: draftSettings.currencySymbol,
+  })
+  .eq("id", 1);
+
+if (error) {
+  console.error(
+    "Supabase settings save error:",
+    error
+  );
+
+  alert("Could not save restaurant settings.");
+  return;
+}
+
     setSettings(draftSettings);
     setShowSettings(false);
   };
 
+const addDish = async () => {
+  if (!newDishName.trim()) {
+    alert("Please enter the dish name.");
+    return;
+  }
+
+  if (!newDishPrice || Number(newDishPrice) < 0) {
+    alert("Please enter a valid price.");
+    return;
+  }
+
+  if (!newDishCategoryId) {
+    alert("Please select a category.");
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("menu_items")
+    .insert({
+      name: newDishName.trim(),
+      description:
+        newDishDescription.trim() || null,
+      price: Number(newDishPrice),
+      category_id: newDishCategoryId,
+      image_url:
+        newDishImageUrl.trim() || null,
+      vegetarian: newDishVegetarian,
+      station: newDishStation,
+      active: true,
+      display_order: menuItems.length + 1,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error(
+      "Add dish error:",
+      error
+    );
+
+    alert("Could not add the dish.");
+    return;
+  }
+
+  if (data) {
+    setMenuItems((current) => [
+      ...current,
+      {
+        id: Number(data.id),
+        name: data.name,
+        description: data.description,
+        price: Number(data.price),
+        category_id: data.category_id
+          ? Number(data.category_id)
+          : null,
+        image_url: data.image_url,
+        vegetarian: Boolean(
+          data.vegetarian
+        ),
+        station:
+          data.station === "pizza" ||
+          data.station === "bar"
+            ? data.station
+            : "kitchen",
+        active: Boolean(data.active),
+        display_order:
+          data.display_order || 0,
+      },
+    ]);
+  }
+
+  setNewDishName("");
+  setNewDishDescription("");
+  setNewDishPrice("");
+  setNewDishCategoryId(null);
+  setNewDishImageUrl("");
+  setNewDishVegetarian(false);
+  setNewDishStation("kitchen");
+
+  setShowAddDish(false);
+
+  alert("Dish added successfully.");
+};
+
+const saveEditedDish = async () => {
+  if (!editingDish) return;
+
+  if (!editingDish.name.trim()) {
+    alert("Please enter the dish name.");
+    return;
+  }
+
+  if (editingDish.price < 0) {
+    alert("Please enter a valid price.");
+    return;
+  }
+
+  if (!editingDish.category_id) {
+    alert("Please select a category.");
+    return;
+  }
+
+  const { error } = await supabase
+    .from("menu_items")
+    .update({
+      name: editingDish.name.trim(),
+      description:
+        editingDish.description?.trim() || null,
+      price: editingDish.price,
+      category_id: editingDish.category_id,
+      image_url:
+        editingDish.image_url?.trim() || null,
+      vegetarian: editingDish.vegetarian,
+      station: editingDish.station,
+      active: editingDish.active,
+      display_order: editingDish.display_order,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", editingDish.id);
+
+  if (error) {
+    console.error("Edit dish error:", error);
+    alert("Could not update the dish.");
+    return;
+  }
+
+  setMenuItems((current) =>
+    current.map((item) =>
+      item.id === editingDish.id
+        ? { ...editingDish }
+        : item
+    )
+  );
+
+  setEditingDish(null);
+
+  alert("Dish updated successfully.");
+};
+
   return (
+    <StaffGuard>
     <main className="min-h-screen bg-[#0d0f10] text-white">
+
+
 
       {/* HEADER */}
 
@@ -452,6 +867,13 @@ const selectedDayReport = useMemo(() => {
             </p>
 
           </div>
+
+<button
+  onClick={() => setShowMenuManagement(true)}
+  className="rounded-xl bg-red-600 px-5 py-3 font-bold text-white transition hover:bg-red-700"
+>
+  Menu Management
+</button>
 
           <button
             onClick={resetDemo}
@@ -522,6 +944,54 @@ const selectedDayReport = useMemo(() => {
           </div>
 
         </div>
+{/* TODAY'S PAYMENT BREAKDOWN */}
+<div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+
+  <div className="rounded-2xl border border-white/10 bg-[#141719] p-5">
+    <p className="text-sm font-bold text-gray-500">
+      CASH
+    </p>
+
+    <p className="mt-3 text-3xl font-black">
+      {settings.currencySymbol}
+      {todayPaymentBreakdown.cash.toFixed(2)}
+    </p>
+  </div>
+
+  <div className="rounded-2xl border border-white/10 bg-[#141719] p-5">
+    <p className="text-sm font-bold text-gray-500">
+      CARD
+    </p>
+
+    <p className="mt-3 text-3xl font-black">
+      {settings.currencySymbol}
+      {todayPaymentBreakdown.card.toFixed(2)}
+    </p>
+  </div>
+
+  <div className="rounded-2xl border border-white/10 bg-[#141719] p-5">
+    <p className="text-sm font-bold text-gray-500">
+      TICKET RESTAURANT
+    </p>
+
+    <p className="mt-3 text-3xl font-black">
+      {settings.currencySymbol}
+      {todayPaymentBreakdown.ticket.toFixed(2)}
+    </p>
+  </div>
+
+  <div className="rounded-2xl border border-white/10 bg-[#141719] p-5">
+    <p className="text-sm font-bold text-gray-500">
+      OTHER
+    </p>
+
+    <p className="mt-3 text-3xl font-black">
+      {settings.currencySymbol}
+      {todayPaymentBreakdown.other.toFixed(2)}
+    </p>
+  </div>
+
+</div>
 
         {/* MAIN ROW */}
 
@@ -1097,6 +1567,699 @@ const selectedDayReport = useMemo(() => {
   </div>
 )}
 
+{/* MENU MANAGEMENT MODAL */}
+{showMenuManagement && (
+  <div className="fixed inset-0 z-50 bg-black/80 p-5">
+    <div className="mx-auto flex max-h-[94vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#111416]">
+
+      {/* HEADER */}
+      <div className="flex items-center justify-between border-b border-white/10 p-6">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-widest text-red-500">
+            DINEVO ADMIN
+          </p>
+
+          <h2 className="mt-1 text-2xl font-black">
+            Menu Management
+          </h2>
+
+          <p className="mt-1 text-sm text-gray-500">
+            Manage restaurant categories and dishes
+          </p>
+        </div>
+
+        <button
+          onClick={() => setShowMenuManagement(false)}
+          className="rounded-xl border border-white/10 bg-[#1a1e21] px-4 py-2 font-bold text-gray-300 hover:bg-white/10"
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* CONTENT */}
+      <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto p-6 lg:grid-cols-[280px_1fr]">
+
+        {/* CATEGORIES */}
+        <aside className="rounded-2xl border border-white/10 bg-[#141719] p-5">
+
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-black">
+                CATEGORIES
+              </h3>
+
+              <p className="mt-1 text-xs text-gray-500">
+                {menuCategories.length} categories
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5 space-y-2">
+            {menuCategories.length === 0 ? (
+              <div className="rounded-xl bg-[#1a1e21] p-4 text-sm text-gray-500">
+                No categories found.
+              </div>
+            ) : (
+              menuCategories.map((category) => (
+                <div
+                  key={category.id}
+                  className="flex items-center justify-between rounded-xl border border-white/5 bg-[#1a1e21] p-4"
+                >
+                  <div>
+                    <p className="font-bold">
+                      {category.name}
+                    </p>
+
+                    <p className="mt-1 text-xs text-gray-500">
+                      Order #{category.display_order}
+                    </p>
+                  </div>
+
+                  <span
+                    className={`rounded-lg px-2 py-1 text-[10px] font-black uppercase ${
+                      category.active
+                        ? "bg-green-500/10 text-green-400"
+                        : "bg-gray-500/10 text-gray-500"
+                    }`}
+                  >
+                    {category.active
+                      ? "Active"
+                      : "Inactive"}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+
+        </aside>
+
+        {/* DISHES */}
+        <section className="rounded-2xl border border-white/10 bg-[#141719] p-5">
+
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-black">
+                MENU ITEMS
+              </h3>
+
+              <p className="mt-1 text-xs text-gray-500">
+                {menuItems.length} dishes
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+
+  <div className="rounded-lg bg-red-500/10 px-3 py-2 text-xs font-bold text-red-400">
+    {menuItems.filter((item) => item.active).length} Active
+  </div>
+
+  <button
+    onClick={() => setShowAddDish(true)}
+    className="rounded-lg bg-red-600 px-4 py-2 text-xs font-black text-white hover:bg-red-700"
+  >
+    + Add Dish
+  </button>
+
+</div>
+          </div>
+
+          <div className="mt-5 space-y-3">
+
+            {menuItems.length === 0 ? (
+              <div className="rounded-xl bg-[#1a1e21] p-8 text-center text-gray-500">
+                No menu items found.
+              </div>
+            ) : (
+              menuItems.map((item) => {
+
+                const category =
+                  menuCategories.find(
+                    (category) =>
+                      category.id === item.category_id
+                  );
+
+                return (
+                  <div
+                    key={item.id}
+                    className="grid gap-4 rounded-2xl border border-white/5 bg-[#1a1e21] p-4 md:grid-cols-[1fr_150px_120px_100px]"
+                  >
+
+                    {/* NAME */}
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-black">
+                          {item.name}
+                        </p>
+
+                        {item.vegetarian && (
+                          <span className="rounded-md bg-green-500/10 px-2 py-1 text-[10px] font-black text-green-400">
+                            VEG
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="mt-1 text-xs text-gray-500">
+                        {category?.name ||
+                          "No Category"}
+                      </p>
+
+                      {item.description && (
+                        <p className="mt-2 line-clamp-2 text-xs text-gray-400">
+                          {item.description}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* STATION */}
+                    <div>
+                      <p className="text-xs text-gray-500">
+                        Station
+                      </p>
+
+                      <p className="mt-1 font-bold capitalize">
+                        {item.station}
+                      </p>
+                    </div>
+
+                    {/* PRICE */}
+                    <div>
+                      <p className="text-xs text-gray-500">
+                        Price
+                      </p>
+
+                      <p className="mt-1 font-black text-red-500">
+                        {settings.currencySymbol}
+                        {item.price.toFixed(2)}
+                      </p>
+                    </div>
+
+                    {/* STATUS */}
+                    <div className="md:text-right">
+  <p className="text-xs text-gray-500">
+    Status
+  </p>
+
+  <p
+    className={`mt-1 font-bold ${
+      item.active
+        ? "text-green-400"
+        : "text-gray-500"
+    }`}
+  >
+    {item.active
+      ? "Active"
+      : "Inactive"}
+  </p>
+
+  <button
+    onClick={() => setEditingDish(item)}
+    className="mt-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-black text-white hover:bg-white/10"
+  >
+    Edit
+  </button>
+</div>
+
+                  </div>
+                );
+              })
+            )}
+
+          </div>
+
+        </section>
+
+      </div>
+    </div>
+  </div>
+)}
+
+{/* EDIT DISH MODAL */}
+{editingDish && (
+  <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-5">
+
+    <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-white/10 bg-[#141719] p-6">
+
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-widest text-red-500">
+            DINEVO ADMIN
+          </p>
+
+          <h2 className="mt-1 text-2xl font-black">
+            Edit Dish
+          </h2>
+
+          <p className="mt-1 text-sm text-gray-500">
+            Update menu item details
+          </p>
+        </div>
+
+        <button
+          onClick={() => setEditingDish(null)}
+          className="rounded-xl border border-white/10 bg-[#1a1e21] px-4 py-2 font-bold"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="mt-6 space-y-5">
+
+        <div>
+          <label className="text-sm font-bold text-gray-400">
+            Dish Name
+          </label>
+
+          <input
+            value={editingDish.name}
+            onChange={(e) =>
+              setEditingDish({
+                ...editingDish,
+                name: e.target.value,
+              })
+            }
+            className="mt-2 w-full rounded-xl border border-white/10 bg-[#1a1e21] px-4 py-3 text-white outline-none focus:border-red-500"
+          />
+        </div>
+
+        <div>
+          <label className="text-sm font-bold text-gray-400">
+            Description
+          </label>
+
+          <textarea
+            rows={3}
+            value={editingDish.description || ""}
+            onChange={(e) =>
+              setEditingDish({
+                ...editingDish,
+                description: e.target.value,
+              })
+            }
+            className="mt-2 w-full rounded-xl border border-white/10 bg-[#1a1e21] px-4 py-3 text-white outline-none focus:border-red-500"
+          />
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+
+          <div>
+            <label className="text-sm font-bold text-gray-400">
+              Price
+            </label>
+
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={editingDish.price}
+              onChange={(e) =>
+                setEditingDish({
+                  ...editingDish,
+                  price: Number(e.target.value),
+                })
+              }
+              className="mt-2 w-full rounded-xl border border-white/10 bg-[#1a1e21] px-4 py-3 text-white outline-none focus:border-red-500"
+            />
+          </div>
+
+          <div>
+            <label className="text-sm font-bold text-gray-400">
+              Category
+            </label>
+
+            <select
+              value={editingDish.category_id ?? ""}
+              onChange={(e) =>
+                setEditingDish({
+                  ...editingDish,
+                  category_id: e.target.value
+                    ? Number(e.target.value)
+                    : null,
+                })
+              }
+              className="mt-2 w-full rounded-xl border border-white/10 bg-[#1a1e21] px-4 py-3 text-white outline-none focus:border-red-500"
+            >
+              <option value="">
+                Select Category
+              </option>
+
+              {menuCategories.map((category) => (
+                <option
+                  key={category.id}
+                  value={category.id}
+                >
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+        </div>
+
+        <div>
+          <label className="text-sm font-bold text-gray-400">
+            Image URL
+          </label>
+
+          <input
+            value={editingDish.image_url || ""}
+            onChange={(e) =>
+              setEditingDish({
+                ...editingDish,
+                image_url: e.target.value,
+              })
+            }
+            className="mt-2 w-full rounded-xl border border-white/10 bg-[#1a1e21] px-4 py-3 text-white outline-none focus:border-red-500"
+          />
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+
+          <div>
+            <label className="text-sm font-bold text-gray-400">
+              Station
+            </label>
+
+            <select
+              value={editingDish.station}
+              onChange={(e) =>
+                setEditingDish({
+                  ...editingDish,
+                  station: e.target.value as
+                    | "kitchen"
+                    | "pizza"
+                    | "bar",
+                })
+              }
+              className="mt-2 w-full rounded-xl border border-white/10 bg-[#1a1e21] px-4 py-3 text-white outline-none focus:border-red-500"
+            >
+              <option value="kitchen">
+                Kitchen
+              </option>
+
+              <option value="pizza">
+                Pizza
+              </option>
+
+              <option value="bar">
+                Bar
+              </option>
+            </select>
+          </div>
+
+          <div>
+            <label className="text-sm font-bold text-gray-400">
+              Vegetarian
+            </label>
+
+            <button
+              type="button"
+              onClick={() =>
+                setEditingDish({
+                  ...editingDish,
+                  vegetarian:
+                    !editingDish.vegetarian,
+                })
+              }
+              className={`mt-2 w-full rounded-xl border px-4 py-3 font-bold ${
+                editingDish.vegetarian
+                  ? "border-green-500/40 bg-green-500/10 text-green-400"
+                  : "border-white/10 bg-[#1a1e21] text-gray-400"
+              }`}
+            >
+              {editingDish.vegetarian
+                ? "Yes"
+                : "No"}
+            </button>
+          </div>
+
+        </div>
+
+        <div>
+          <label className="text-sm font-bold text-gray-400">
+            Status
+          </label>
+
+          <button
+            type="button"
+            onClick={() =>
+              setEditingDish({
+                ...editingDish,
+                active: !editingDish.active,
+              })
+            }
+            className={`mt-2 w-full rounded-xl border px-4 py-3 font-bold ${
+              editingDish.active
+                ? "border-green-500/40 bg-green-500/10 text-green-400"
+                : "border-red-500/40 bg-red-500/10 text-red-400"
+            }`}
+          >
+            {editingDish.active
+              ? "Active"
+              : "Inactive"}
+          </button>
+        </div>
+
+      </div>
+
+      <div className="mt-7 flex gap-3">
+
+        <button
+          onClick={() => setEditingDish(null)}
+          className="flex-1 rounded-xl border border-white/10 py-3 font-bold"
+        >
+          Cancel
+        </button>
+
+        <button
+  onClick={saveEditedDish}
+  className="flex-1 rounded-xl bg-red-600 py-3 font-black hover:bg-red-700"
+>
+  Save Changes
+</button>
+
+      </div>
+
+    </div>
+  </div>
+)}
+
+{/* ADD DISH MODAL */}
+{showAddDish && (
+  <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-5">
+
+    <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-white/10 bg-[#141719] p-6">
+
+      <div className="flex items-start justify-between">
+
+        <div>
+          <p className="text-xs font-bold uppercase tracking-widest text-red-500">
+            DINEVO ADMIN
+          </p>
+
+          <h2 className="mt-1 text-2xl font-black">
+            Add New Dish
+          </h2>
+
+          <p className="mt-1 text-sm text-gray-500">
+            Create a new menu item
+          </p>
+        </div>
+
+        <button
+          onClick={() => setShowAddDish(false)}
+          className="rounded-xl border border-white/10 bg-[#1a1e21] px-4 py-2 font-bold"
+        >
+          ✕
+        </button>
+
+      </div>
+
+      <div className="mt-6 space-y-5">
+
+        <div>
+          <label className="text-sm font-bold text-gray-400">
+            Dish Name
+          </label>
+
+          <input
+            value={newDishName}
+            onChange={(e) =>
+              setNewDishName(e.target.value)
+            }
+            placeholder="Example: Chicken Burger"
+            className="mt-2 w-full rounded-xl border border-white/10 bg-[#1a1e21] px-4 py-3 text-white outline-none focus:border-red-500"
+          />
+        </div>
+
+        <div>
+          <label className="text-sm font-bold text-gray-400">
+            Description
+          </label>
+
+          <textarea
+            value={newDishDescription}
+            onChange={(e) =>
+              setNewDishDescription(e.target.value)
+            }
+            placeholder="Short dish description"
+            rows={3}
+            className="mt-2 w-full rounded-xl border border-white/10 bg-[#1a1e21] px-4 py-3 text-white outline-none focus:border-red-500"
+          />
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+
+          <div>
+            <label className="text-sm font-bold text-gray-400">
+              Price
+            </label>
+
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={newDishPrice}
+              onChange={(e) =>
+                setNewDishPrice(e.target.value)
+              }
+              placeholder="12.90"
+              className="mt-2 w-full rounded-xl border border-white/10 bg-[#1a1e21] px-4 py-3 text-white outline-none focus:border-red-500"
+            />
+          </div>
+
+          <div>
+            <label className="text-sm font-bold text-gray-400">
+              Category
+            </label>
+
+            <select
+              value={newDishCategoryId ?? ""}
+              onChange={(e) =>
+                setNewDishCategoryId(
+                  e.target.value
+                    ? Number(e.target.value)
+                    : null
+                )
+              }
+              className="mt-2 w-full rounded-xl border border-white/10 bg-[#1a1e21] px-4 py-3 text-white outline-none focus:border-red-500"
+            >
+              <option value="">
+                Select Category
+              </option>
+
+              {menuCategories
+                .filter((category) => category.active)
+                .map((category) => (
+                  <option
+                    key={category.id}
+                    value={category.id}
+                  >
+                    {category.name}
+                  </option>
+                ))}
+            </select>
+          </div>
+
+        </div>
+
+        <div>
+          <label className="text-sm font-bold text-gray-400">
+            Image URL
+          </label>
+
+          <input
+            value={newDishImageUrl}
+            onChange={(e) =>
+              setNewDishImageUrl(e.target.value)
+            }
+            placeholder="https://..."
+            className="mt-2 w-full rounded-xl border border-white/10 bg-[#1a1e21] px-4 py-3 text-white outline-none focus:border-red-500"
+          />
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+
+          <div>
+            <label className="text-sm font-bold text-gray-400">
+              Station
+            </label>
+
+            <select
+              value={newDishStation}
+              onChange={(e) =>
+                setNewDishStation(
+                  e.target.value as
+                    | "kitchen"
+                    | "pizza"
+                    | "bar"
+                )
+              }
+              className="mt-2 w-full rounded-xl border border-white/10 bg-[#1a1e21] px-4 py-3 text-white outline-none focus:border-red-500"
+            >
+              <option value="kitchen">
+                Kitchen
+              </option>
+
+              <option value="pizza">
+                Pizza
+              </option>
+
+              <option value="bar">
+                Bar
+              </option>
+            </select>
+          </div>
+
+          <div>
+            <label className="text-sm font-bold text-gray-400">
+              Vegetarian
+            </label>
+
+            <button
+              type="button"
+              onClick={() =>
+                setNewDishVegetarian(
+                  !newDishVegetarian
+                )
+              }
+              className={`mt-2 w-full rounded-xl border px-4 py-3 font-bold ${
+                newDishVegetarian
+                  ? "border-green-500/40 bg-green-500/10 text-green-400"
+                  : "border-white/10 bg-[#1a1e21] text-gray-400"
+              }`}
+            >
+              {newDishVegetarian
+                ? "Yes"
+                : "No"}
+            </button>
+          </div>
+
+        </div>
+
+      </div>
+
+      <div className="mt-7 flex gap-3">
+
+        <button
+          onClick={() => setShowAddDish(false)}
+          className="flex-1 rounded-xl border border-white/10 py-3 font-bold"
+        >
+          Cancel
+        </button>
+
+       <button
+  onClick={addDish}
+  className="flex-1 rounded-xl bg-red-600 py-3 font-black hover:bg-red-700"
+>
+  Add Dish
+</button>
+
+      </div>
+
+    </div>
+  </div>
+)}
+
       {/* SETTINGS MODAL */}
 
       {showSettings && (
@@ -1245,5 +2408,6 @@ const selectedDayReport = useMemo(() => {
       )}
 
     </main>
+    </StaffGuard>
   );
 }

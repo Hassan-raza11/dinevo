@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-
+import { supabase } from "@/lib/supabase";
 type MenuItem = {
   id: number;
   name: string;
@@ -15,86 +15,16 @@ type CartItem = MenuItem & {
   quantity: number;
 };
 
-const categories = [
-  "All",
-  "Starters",
-  "Main Course",
-  "Pizza",
-  "Burgers",
-  "Drinks",
-  "Smoothies",
-  "Desserts",
-];
 
-const menu: MenuItem[] = [
-  {
-    id: 1,
-    name: "Chicken Karahi",
-    category: "Main Course",
-    price: 15.9,
-    station: "kitchen",
-  },
-  {
-    id: 2,
-    name: "Bruschetta",
-    category: "Starters",
-    price: 6.5,
-    station: "kitchen",
-  },
-  {
-    id: 3,
-    name: "Pasta Alfredo",
-    category: "Main Course",
-    price: 8.9,
-    station: "kitchen",
-  },
-  {
-    id: 4,
-    name: "Beef Burger",
-    category: "Burgers",
-    price: 9.9,
-    station: "kitchen",
-  },
-  {
-    id: 5,
-    name: "Margherita Pizza",
-    category: "Pizza",
-    price: 11.9,
-    station: "pizza",
-  },
-  {
-    id: 6,
-    name: "Coca-Cola",
-    category: "Drinks",
-    price: 2.5,
-    station: "bar",
-  },
-  {
-    id: 7,
-    name: "Mineral Water",
-    category: "Drinks",
-    price: 3,
-    station: "bar",
-  },
-  {
-    id: 8,
-    name: "Mango Smoothie",
-    category: "Smoothies",
-    price: 6.5,
-    station: "bar",
-  },
-  {
-    id: 9,
-    name: "Chocolate Cake",
-    category: "Desserts",
-    price: 7.5,
-    station: "kitchen",
-  },
-];
+
 
 export default function ManualOrderPage() {
   const router = useRouter();
+const [categories, setCategories] = useState<string[]>([
+  "All",
+]);
 
+const [menu, setMenu] = useState<MenuItem[]>([]);
   const [tableNumber, setTableNumber] = useState("");
   const [guestName, setGuestName] = useState("Walk-in");
 
@@ -102,7 +32,117 @@ export default function ManualOrderPage() {
   const [search, setSearch] = useState("");
 
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [currencySymbol, setCurrencySymbol] =
+  useState("€");
+useEffect(() => {
+  const loadMenu = async () => {
+    const {
+  data: settingsData,
+  error: settingsError,
+} = await supabase
+  .from("restaurant_settings")
+  .select("currency_symbol")
+  .eq("id", 1)
+  .single();
 
+if (settingsError) {
+  console.error(
+    "Manual order settings load error:",
+    settingsError
+  );
+} else if (settingsData?.currency_symbol) {
+  setCurrencySymbol(
+    settingsData.currency_symbol
+  );
+}
+    const {
+      data: categoryData,
+      error: categoryError,
+    } = await supabase
+      .from("menu_categories")
+      .select("id, name, display_order")
+      .eq("active", true)
+      .order("display_order", {
+        ascending: true,
+      });
+
+    if (categoryError) {
+      console.error(
+        "Manual order category load error:",
+        categoryError
+      );
+      return;
+    }
+
+    const {
+      data: itemData,
+      error: itemError,
+    } = await supabase
+      .from("menu_items")
+      .select(`
+        id,
+        name,
+        price,
+        station,
+        category_id
+      `)
+      .eq("active", true)
+      .order("display_order", {
+        ascending: true,
+      });
+
+    if (itemError) {
+      console.error(
+        "Manual order menu load error:",
+        itemError
+      );
+      return;
+    }
+
+    const categoryMap = new Map(
+      (categoryData || []).map((category) => [
+        category.id,
+        category.name,
+      ])
+    );
+
+    const formattedMenu: MenuItem[] = (
+      itemData || []
+    ).map((item) => ({
+      id: Number(item.id),
+      name: item.name,
+      category:
+        categoryMap.get(item.category_id) ||
+        "Other",
+      price: Number(item.price),
+      station:
+        item.station === "pizza" ||
+        item.station === "bar"
+          ? item.station
+          : "kitchen",
+    }));
+
+    setCategories([
+      "All",
+      ...(categoryData || []).map(
+        (category) => category.name
+      ),
+    ]);
+
+    setMenu(formattedMenu);
+  };
+
+  loadMenu();
+
+const interval = setInterval(() => {
+  loadMenu();
+}, 3000);
+
+return () => {
+  clearInterval(interval);
+};
+}, []);
   const filteredMenu = menu.filter((item) => {
     const categoryMatch =
       category === "All" || item.category === category;
@@ -183,65 +223,94 @@ export default function ManualOrderPage() {
       current.filter((item) => item.id !== itemId)
     );
   };
+const saveOrder = async () => {
+  if (isSaving) return;
+  if (!tableNumber.trim()) {
+    alert("Please enter a table number.");
+    return;
+  }
 
-  const saveOrder = () => {
-    if (!tableNumber.trim()) {
-      alert("Please enter a table number.");
-      return;
+  if (!guestName.trim()) {
+    alert("Please enter a guest name.");
+    return;
+  }
+
+  if (cart.length === 0) {
+    alert("Please add at least one item.");
+    return;
+  }
+  setIsSaving(true);
+
+  try {
+    const orderNumber = String(Date.now()).slice(-5);
+
+    const {
+      data: orderData,
+      error: orderError,
+    } = await supabase
+      .from("orders")
+      .insert({
+        order_number: orderNumber,
+        table_number: tableNumber.trim(),
+        service_type: "dine-in",
+        total,
+        kitchen_status: "pending",
+        waiter_status: "waiting",
+        payment_status: "unpaid",
+      })
+      .select("id")
+      .single();
+
+    if (orderError) {
+      throw orderError;
     }
 
-    if (!guestName.trim()) {
-      alert("Please enter a guest name.");
-      return;
+    const {
+      data: guestData,
+      error: guestError,
+    } = await supabase
+      .from("order_guests")
+      .insert({
+        order_id: orderData.id,
+        guest_name: guestName.trim(),
+      })
+      .select("id")
+      .single();
+
+    if (guestError) {
+      throw guestError;
     }
 
-    if (cart.length === 0) {
-      alert("Please add at least one item.");
-      return;
+    const itemsToInsert = cart.map((item) => ({
+      order_id: orderData.id,
+      guest_id: guestData.id,
+      item_name: item.name,
+      price: item.price,
+      quantity: item.quantity,
+      station: item.station,
+    }));
+
+    const { error: itemsError } = await supabase
+      .from("order_items")
+      .insert(itemsToInsert);
+
+    if (itemsError) {
+      throw itemsError;
     }
 
-    const orderId = Date.now();
-
-    const newOrder = {
-      id: orderId,
-      orderNumber: String(orderId).slice(-5),
-      tableNumber: tableNumber.trim(),
-      serviceType: "dine-in",
-      language: "en",
-      createdAt: Date.now(),
-      status: "new",
-      paymentStatus: "unpaid",
-
-      guests: [
-        {
-          guestName: guestName.trim(),
-
-          items: cart.map((item) => ({
-            id: item.id,
-            name: item.name,
-            quantity: item.quantity,
-            price: item.price,
-            station: item.station,
-            done: false,
-          })),
-        },
-      ],
-
-      total,
-      manualOrder: true,
-    };
-
-    const existingOrders = JSON.parse(
-      localStorage.getItem("dinevo-orders") || "[]"
-    );
-
-    localStorage.setItem(
-      "dinevo-orders",
-      JSON.stringify([...existingOrders, newOrder])
-    );
+    alert("Manual order created successfully.");
 
     router.push("/cashier");
-  };
+  } catch (error) {
+    console.error(
+      "Manual order Supabase save error:",
+      error
+    );
+
+    alert("Could not create manual order.");
+    setIsSaving(false);
+  }
+};
 
   return (
     <main className="min-h-screen bg-[#0d0f10] text-white">
@@ -373,7 +442,7 @@ export default function ManualOrderPage() {
                 <div className="mt-5 flex items-center justify-between">
 
                   <strong className="text-xl text-red-500">
-                    €{item.price.toFixed(2)}
+                   {currencySymbol}{item.price.toFixed(2)}
                   </strong>
 
                   <button
@@ -431,7 +500,7 @@ export default function ManualOrderPage() {
                       </p>
 
                       <p className="mt-1 text-sm text-gray-400">
-                        €{item.price.toFixed(2)}
+                        {currencySymbol}{item.price.toFixed(2)}
                       </p>
 
                     </div>
@@ -476,7 +545,7 @@ export default function ManualOrderPage() {
                     </div>
 
                     <strong>
-                      €
+                     {currencySymbol}
                       {(
                         item.price * item.quantity
                       ).toFixed(2)}
@@ -499,17 +568,17 @@ export default function ManualOrderPage() {
             </span>
 
             <strong className="text-3xl text-green-500">
-              €{total.toFixed(2)}
+             {currencySymbol}{total.toFixed(2)}
             </strong>
 
           </div>
 
           <button
             onClick={saveOrder}
-            disabled={cart.length === 0}
+            disabled={cart.length === 0 || isSaving}
             className="mt-6 w-full rounded-xl bg-green-600 py-4 font-black hover:bg-green-700 disabled:bg-gray-700"
           >
-            SAVE ORDER
+           {isSaving ? "SAVING..." : "SAVE ORDER"}
           </button>
 
         </aside>

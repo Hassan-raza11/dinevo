@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import StaffGuard from "@/components/StaffGuard";
 
 type RestaurantSettings = {
   restaurantName: string;
@@ -41,89 +43,230 @@ const defaultSettings: RestaurantSettings = {
 
 export default function KitchenPage() {
 
-  
+  const [completingOrderId, setCompletingOrderId] =
+  useState<number | null>(null);
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
   const [undoMode, setUndoMode] = useState(false);
   const [now, setNow] = useState(Date.now());
 const [settings, setSettings] =
   useState<RestaurantSettings>(defaultSettings);
   
-  // LOAD REAL ORDERS FROM CUSTOMER SIDE
-  useEffect(() => {
-    const loadKitchenOrders = () => {
-      const savedOrders = JSON.parse(
-        localStorage.getItem("dinevo-orders") || "[]"
-      );
+ useEffect(() => {
+  const loadKitchenOrders = async () => {
+   // Load restaurant settings from Supabase
+const { data: settingsData, error: settingsError } =
+  await supabase
+    .from("restaurant_settings")
+    .select(`
+      restaurant_name,
+      tax_rate,
+      preparation_time,
+      currency,
+      currency_symbol
+    `)
+    .eq("id", 1)
+    .single();
 
-      const savedSettings = localStorage.getItem(
-  "dinevo-settings"
-);
-
-if (savedSettings) {
-  setSettings(JSON.parse(savedSettings));
+if (settingsError) {
+  console.error(
+    "Kitchen settings load error:",
+    settingsError
+  );
+} else if (settingsData) {
+  setSettings({
+    restaurantName: settingsData.restaurant_name,
+    taxRate: Number(settingsData.tax_rate),
+    preparationTime: settingsData.preparation_time,
+    currency: settingsData.currency,
+    currencySymbol: settingsData.currency_symbol,
+  });
 }
 
-      const kitchenOrders: KitchenOrder[] = savedOrders
-      
-  .filter(
-    (order: any) =>
-      order.kitchenStatus !== "completed"
-  )
-  .map((order: any) => ({
-          id: order.id,
-          tableNumber: order.tableNumber,
-          orderNumber: order.orderNumber,
-          createdAt: order.createdAt,
+    // Load orders from Supabase
+    const { data, error } = await supabase
+      .from("orders")
+      .select(`
+        id,
+        order_number,
+        table_number,
+        created_at,
+        kitchen_status,
+        order_guests (
+          id,
+          guest_name,
+          order_items (
+  id,
+  item_name,
+  price,
+  quantity,
+  station,
+  done
+)
+        )
+      `)
+      .neq("kitchen_status", "completed")
+      .order("created_at", {
+        ascending: true,
+      });
 
-          guests: order.guests
-            .map((guest: any) => ({
-              guestName: guest.guestName,
+    if (error) {
+      console.error(
+        "Kitchen Supabase load error:",
+        error
+      );
+      return;
+    }
 
-              items: guest.items.filter(
-                (item: any) => item.station === "kitchen"
-              ),
-            }))
-            .filter(
-              (guest: GuestOrder) => guest.items.length > 0
-            ),
-        }))
-        .filter(
-          (order: KitchenOrder) => order.guests.length > 0
-        );
+    const kitchenOrders: KitchenOrder[] = (
+      data || []
+    )
+      .map((order: any) => ({
+        id: order.id,
 
-      setOrders(kitchenOrders);
-    };
+        tableNumber: order.table_number,
 
-    loadKitchenOrders();
+        orderNumber: order.order_number,
 
-    const interval = setInterval(() => {
-      setNow(Date.now());
-      loadKitchenOrders();
-    }, 1000);
+        createdAt: new Date(order.created_at).getTime(),
 
-    return () => clearInterval(interval);
-  }, []);
+        guests: (order.order_guests || [])
+          .map((guest: any) => ({
+            guestName: guest.guest_name,
+
+            items: (guest.order_items || [])
+              .filter(
+                (item: any) =>
+                  item.station === "kitchen"
+              )
+            .map((item: any) => ({
+  id: item.id,
+  name: item.item_name,
+  price: Number(item.price),
+  quantity: item.quantity,
+  station: item.station,
+  done: Boolean(item.done),
+}))
+          }))
+          .filter(
+            (guest: GuestOrder) =>
+              guest.items.length > 0
+          ),
+      }))
+      .filter(
+        (order: KitchenOrder) =>
+          order.guests.length > 0
+      );
+
+    setOrders(kitchenOrders);
+  };
+
+  // First load
+  loadKitchenOrders();
+
+  // Keep Kitchen timer moving every second
+  const timerInterval = setInterval(() => {
+    setNow(Date.now());
+  }, 1000);
+
+// Backup refresh every 3 seconds
+const refreshInterval = setInterval(() => {
+  loadKitchenOrders();
+}, 3000);
+
+  // Realtime listener
+  const kitchenChannel = supabase
+    .channel("dinevo-kitchen-orders")
+
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "orders",
+      },
+      () => {
+        loadKitchenOrders();
+      }
+    )
+
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "order_guests",
+      },
+      () => {
+        loadKitchenOrders();
+      }
+    )
+
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "order_items",
+      },
+      () => {
+        loadKitchenOrders();
+      }
+    )
+
+    .subscribe();
+
+  return () => {
+  clearInterval(timerInterval);
+  clearInterval(refreshInterval);
+  supabase.removeChannel(kitchenChannel);
+};
+}, []);
+
+  
 
   // MARK DISH DONE OR UNDO
-  const toggleItem = (
-    orderId: number,
-    guestIndex: number,
-    itemId: number
-  ) => {
-    const savedOrders = JSON.parse(
-      localStorage.getItem("dinevo-orders") || "[]"
+ const toggleItem = async (
+  orderId: number,
+  guestIndex: number,
+  itemId: number
+) => {
+  const kitchenOrder = orders.find(
+    (order) => order.id === orderId
+  );
+
+  if (!kitchenOrder) return;
+
+  const item =
+    kitchenOrder.guests[guestIndex]?.items.find(
+      (item) => item.id === itemId
     );
 
-    const kitchenOrder = orders.find(
-      (order) => order.id === orderId
-    );
+  if (!item) return;
 
-    if (!kitchenOrder) return;
+  const newDoneValue = undoMode ? false : true;
 
-    const guestName =
-      kitchenOrder.guests[guestIndex]?.guestName;
+  const { error } = await supabase
+    .from("order_items")
+    .update({
+      done: newDoneValue,
+    })
+    .eq("id", itemId);
 
-    const updatedOrders = savedOrders.map((order: any) => {
+if (error) {
+  console.error(
+    "Kitchen item update error:",
+    error
+  );
+
+  alert(
+    "Could not update dish status. Please try again."
+  );
+
+  return;
+}
+
+  setOrders((currentOrders) =>
+    currentOrders.map((order) => {
       if (order.id !== orderId) {
         return order;
       }
@@ -131,48 +274,8 @@ if (savedSettings) {
       return {
         ...order,
 
-        guests: order.guests.map((guest: any) => {
-          if (guest.guestName !== guestName) {
-            return guest;
-          }
-
-          return {
-            ...guest,
-
-            items: guest.items.map((item: any) => {
-              if (
-                item.id !== itemId ||
-                item.station !== "kitchen"
-              ) {
-                return item;
-              }
-
-              return {
-                ...item,
-                done: undoMode ? false : true,
-              };
-            }),
-          };
-        }),
-      };
-    });
-
-   localStorage.setItem(
-  "dinevo-orders",
-  JSON.stringify(updatedOrders)
-);
-
-
-    setOrders((currentOrders) =>
-      currentOrders.map((order) => {
-        if (order.id !== orderId) {
-          return order;
-        }
-
-        return {
-          ...order,
-
-          guests: order.guests.map((guest, index) => {
+        guests: order.guests.map(
+          (guest, index) => {
             if (index !== guestIndex) {
               return guest;
             }
@@ -184,39 +287,45 @@ if (savedSettings) {
                 item.id === itemId
                   ? {
                       ...item,
-                      done: undoMode ? false : true,
+                      done: newDoneValue,
                     }
                   : item
               ),
             };
-          }),
-        };
-      })
+          }
+        ),
+      };
+    })
+  );
+};
+const completeOrder = async (orderId: number) => {
+  if (completingOrderId === orderId) return;
+
+  setCompletingOrderId(orderId);
+  // 1. Update Supabase
+  const { error } = await supabase
+    .from("orders")
+    .update({
+      kitchen_status: "completed",
+      kitchen_completed_at: new Date().toISOString(),
+    })
+    .eq("id", orderId);
+
+  if (error) {
+    console.error(
+      "Supabase complete order error:",
+      error
     );
-  };
-const completeOrder = (orderId: number) => {
-  const savedOrders = JSON.parse(
-    localStorage.getItem("dinevo-orders") || "[]"
-  );
 
-  const updatedOrders = savedOrders.map((order: any) => {
-    if (String(order.id) !== String(orderId)) {
-      return order;
-    }
+    alert("Could not complete order");
 
-    return {
-      ...order,
-      kitchenStatus: "completed",
-      kitchenCompleted: true,
-      kitchenCompletedAt: Date.now(),
-    };
-  });
+     setCompletingOrderId(null);
+    return;
+  }
 
-  localStorage.setItem(
-    "dinevo-orders",
-    JSON.stringify(updatedOrders)
-  );
+  
 
+  // 3. Remove from Kitchen immediately
   setOrders((currentOrders) =>
     currentOrders.filter(
       (order) =>
@@ -232,6 +341,7 @@ const completeOrder = (orderId: number) => {
   }, [orders]);
 
   return (
+    <StaffGuard>
     <main className="min-h-screen bg-[#0d0f10] text-white">
 
       {/* HEADER */}
@@ -554,13 +664,16 @@ const timerColor =
 
 {allItemsCompleted && (
   <button
-    onClick={() =>
-      completeOrder(order.id)
-    }
-    className="mt-4 w-full rounded-xl bg-green-600 py-3 font-black text-white transition hover:bg-green-700"
-  >
-    ✓ COMPLETED
-  </button>
+  onClick={() =>
+    completeOrder(order.id)
+  }
+  disabled={completingOrderId === order.id}
+  className="mt-4 w-full rounded-xl bg-green-600 py-3 font-black text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+>
+  {completingOrderId === order.id
+    ? "COMPLETING..."
+    : "✓ COMPLETED"}
+</button>
 )}
 
                   </div>
@@ -577,5 +690,6 @@ const timerColor =
       )}
 
     </main>
+    </StaffGuard>
   );
 }

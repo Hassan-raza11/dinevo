@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+import StaffGuard from "@/components/StaffGuard";
 
 type RestaurantSettings = {
   restaurantName: string;
@@ -26,15 +28,6 @@ type PaymentPart = {
   ticketCode?: string;
 };
 
-type ReceiptData = {
-  orderNumber: string;
-  tableNumber: string;
-  total: number;
-  paymentMethod: "cash" | "card" | "other";
-  received?: number;
-  change?: number;
-  paidAt: number;
-};
 
 type CashierItem = {
   id: number;
@@ -58,11 +51,10 @@ type CashierOrder = {
   guests: GuestOrder[];
   total: number;
   paymentStatus?: "unpaid" | "paid";
-  paymentMethod?: "cash" | "card" | "other";
+ 
   paymentBreakdown?: PaymentPart[];
   paidAt?: number;
-  received?: number;
-change?: number;
+ 
 };
 
 
@@ -79,59 +71,249 @@ const [newPaymentMethod, setNewPaymentMethod] =
 const [newPaymentAmount, setNewPaymentAmount] = useState("");
 
 const [ticketCode, setTicketCode] = useState("");
-const [showTicketScanner, setShowTicketScanner] = useState(false);
-    const [receipt, setReceipt] = useState<ReceiptData | null>(null);
+
+   
     const router = useRouter();
   const [orders, setOrders] = useState<CashierOrder[]>([]);
   const [selectedOrderId, setSelectedOrderId] =
     useState<number | null>(null);
 
-  const [paymentMethod, setPaymentMethod] =
-    useState<"cash" | "card" | "other">("cash");
-
-  const [receivedAmount, setReceivedAmount] = useState("");
+  
   const [search, setSearch] = useState("");
   const [now, setNow] = useState<number | null>(null);
 
   useEffect(() => {
-    const loadOrders = () => {
-      const savedOrders = JSON.parse(
-        localStorage.getItem("dinevo-orders") || "[]"
-      );
-const savedSettings = localStorage.getItem(
-  "dinevo-settings"
-);
+  const loadOrders = async () => {
+  
+// LOAD RESTAURANT SETTINGS FROM SUPABASE
+const {
+  data: settingsData,
+  error: settingsError,
+} = await supabase
+  .from("restaurant_settings")
+  .select(`
+    restaurant_name,
+    tax_rate,
+    preparation_time,
+    currency,
+    currency_symbol
+  `)
+  .eq("id", 1)
+  .single();
 
-if (savedSettings) {
-  setSettings(JSON.parse(savedSettings));
+if (settingsError) {
+  console.error(
+    "Cashier settings load error:",
+    settingsError
+  );
+} else if (settingsData) {
+  setSettings({
+    restaurantName:
+      settingsData.restaurant_name ||
+      "Dinevo Restaurant",
+
+    taxRate:
+      Number(settingsData.tax_rate) || 10,
+
+    preparationTime:
+      Number(settingsData.preparation_time) || 15,
+
+    currency:
+      settingsData.currency || "EUR",
+
+    currencySymbol:
+      settingsData.currency_symbol || "€",
+  });
 }
+    const { data, error } = await supabase
+      .from("orders")
+      .select(`
+        id,
+        order_number,
+        table_number,
+        created_at,
+        total,
+        kitchen_status,
+        waiter_status,
+        payment_status,
+        paid_at,
+        order_guests (
+          id,
+          guest_name,
+          order_items (
+            id,
+            item_name,
+            price,
+            quantity,
+            station
+          )
+        ),
+        payments (
+          id,
+          method,
+          amount,
+          created_at
+        )
+      `)
+      .order("created_at", {
+        ascending: true,
+      });
 
-      setOrders(savedOrders);
+    if (error) {
+      console.error(
+        "Cashier Supabase load error:",
+        error
+      );
+      return;
+    }
 
-      if (selectedOrderId === null) {
-        const firstUnpaid = savedOrders.find(
-          (order: CashierOrder) =>
+    const cashierOrders: CashierOrder[] = (
+      data || []
+    ).map((order: any) => ({
+      id: order.id,
+
+      tableNumber: order.table_number,
+
+      orderNumber: order.order_number,
+
+      createdAt: new Date(
+        order.created_at
+      ).getTime(),
+
+      total: Number(order.total),
+
+      kitchenStatus: order.kitchen_status,
+
+      waiterStatus: order.waiter_status,
+
+      paymentStatus: order.payment_status,
+
+      paidAt: order.paid_at
+        ? new Date(order.paid_at).getTime()
+        : undefined,
+
+      guests: (order.order_guests || []).map(
+        (guest: any) => ({
+          guestName: guest.guest_name,
+
+          items: (guest.order_items || []).map(
+            (item: any) => ({
+              id: item.id,
+              name: item.item_name,
+              price: Number(item.price),
+              quantity: item.quantity,
+              station: item.station,
+            })
+          ),
+        })
+      ),
+
+      paymentBreakdown: (order.payments || []).map(
+        (payment: any) => ({
+          id: payment.id,
+          method: payment.method,
+          amount: Number(payment.amount),
+        })
+      ),
+    }));
+
+    setOrders(cashierOrders);
+
+    // If nothing is selected, automatically select
+    // the first unpaid order.
+    setSelectedOrderId((currentId) => {
+      if (currentId !== null) {
+        const stillExists = cashierOrders.some(
+          (order) =>
+            order.id === currentId &&
             order.paymentStatus !== "paid"
         );
 
-        if (firstUnpaid) {
-          setSelectedOrderId(firstUnpaid.id);
+        if (stillExists) {
+          return currentId;
         }
       }
-    };
 
-    loadOrders();
+      const firstUnpaid = cashierOrders.find(
+        (order) =>
+          order.paymentStatus !== "paid"
+      );
 
-setNow(Date.now());
+      return firstUnpaid
+        ? firstUnpaid.id
+        : null;
+    });
+  };
 
-    const interval = setInterval(() => {
-      setNow(Date.now());
-      loadOrders();
-    }, 1000);
+  // Initial load
+  loadOrders();
 
+  setNow(Date.now());
 
-    return () => clearInterval(interval);
-  }, [selectedOrderId]);
+  // Keep timer moving
+  const timerInterval = setInterval(() => {
+    setNow(Date.now());
+  }, 1000);
+
+  // Listen for order changes
+  const cashierChannel = supabase
+    .channel("dinevo-cashier-orders")
+
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "orders",
+      },
+      () => {
+        loadOrders();
+      }
+    )
+
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "order_guests",
+      },
+      () => {
+        loadOrders();
+      }
+    )
+
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "order_items",
+      },
+      () => {
+        loadOrders();
+      }
+    )
+
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "payments",
+      },
+      () => {
+        loadOrders();
+      }
+    )
+
+    .subscribe();
+
+  return () => {
+    clearInterval(timerInterval);
+    supabase.removeChannel(cashierChannel);
+  };
+}, []);
 
   const openOrders = useMemo(() => {
     return orders
@@ -191,72 +373,99 @@ setNow(Date.now());
     );
 }, [orders, now]);
 
-const completePayment = () => {
+const completePayment = async () => {
   if (!selectedOrder) return;
+const totalPaid = paymentParts.reduce(
+  (sum, part) => sum + part.amount,
+  0
+);
+
+const remaining = selectedOrder.total - totalPaid;
+
+if (remaining > 0.01) {
+  alert(
+    `Payment is incomplete. Remaining: ${settings.currencySymbol}${remaining.toFixed(2)}`
+  );
+  return;
+}
 
   if (paymentParts.length === 0) {
     alert("Please add at least one payment.");
     return;
   }
 
-  const totalPaid = paymentParts.reduce(
-    (sum, part) => sum + part.amount,
-    0
-  );
+  
 
   const difference =
     selectedOrder.total - totalPaid;
 
   if (Math.abs(difference) > 0.01) {
     alert(
-      `Payment is incomplete. Remaining amount: €${Math.max(
-        0,
-        difference
-      ).toFixed(2)}`
+      `Payment is incomplete. Remaining amount: ${settings.currencySymbol}${Math.max(
+  0,
+  difference
+).toFixed(2)}`
     );
     return;
   }
 
   const paidAt = Date.now();
 
-  const savedOrders = JSON.parse(
-    localStorage.getItem("dinevo-orders") || "[]"
+// SAVE PAYMENT TO SUPABASE
+const paymentRows = paymentParts.map((part) => ({
+  order_id: selectedOrder.id,
+  method: part.method,
+  amount: part.amount,
+}));
+
+const { error: paymentError } = await supabase
+  .from("payments")
+  .insert(paymentRows);
+
+if (paymentError) {
+  console.error(
+    "Supabase payment insert error:",
+    paymentError
   );
 
-  const updatedOrders = savedOrders.map(
-    (order: CashierOrder) => {
-      if (order.id !== selectedOrder.id) {
-        return order;
-      }
+  alert("Could not save payment");
+  return;
+}
 
-      return {
+const { error: orderPaymentError } = await supabase
+  .from("orders")
+  .update({
+    payment_status: "paid",
+    paid_at: new Date(paidAt).toISOString(),
+  })
+  .eq("id", selectedOrder.id);
+
+if (orderPaymentError) {
+  console.error(
+    "Supabase order payment update error:",
+    orderPaymentError
+  );
+
+  alert("Could not complete payment");
+  return;
+}
+
+  
+
+ 
+
+ const updatedOrders = orders.map((order) =>
+  order.id === selectedOrder.id
+    ? {
         ...order,
-        paymentStatus: "paid",
+        paymentStatus: "paid" as const,
         paymentBreakdown: paymentParts,
         paidAt,
-      };
-    }
-  );
+      }
+    : order
+);
 
-  localStorage.setItem(
-    "dinevo-orders",
-    JSON.stringify(updatedOrders)
-  );
-
-  const receiptData = {
-    orderNumber: selectedOrder.orderNumber,
-    tableNumber: selectedOrder.tableNumber,
-    total: selectedOrder.total,
-    paymentBreakdown: paymentParts,
-    paidAt,
-  };
-
-  localStorage.setItem(
-    "dinevo-last-receipt",
-    JSON.stringify(receiptData)
-  );
-
-  setOrders(updatedOrders);
+setOrders(updatedOrders);
 
   const nextUnpaid = updatedOrders.find(
     (order: CashierOrder) =>
@@ -296,9 +505,9 @@ const printSelectedOrder = () => {
           (item) => `
             <div class="item">
               <span>${item.quantity} × ${item.name}</span>
-              <span>€${(
-                item.price * item.quantity
-              ).toFixed(2)}</span>
+              <span>${settings.currencySymbol}${(
+  item.price * item.quantity
+).toFixed(2)}</span>
             </div>
           `
         )
@@ -312,7 +521,7 @@ const printSelectedOrder = () => {
 
           <div class="guest-total">
             <span>Guest Total</span>
-            <strong>€${guestTotal.toFixed(2)}</strong>
+            <strong>${settings.currencySymbol}${guestTotal.toFixed(2)}</strong>
           </div>
         </section>
       `;
@@ -340,28 +549,21 @@ const paidInformation =
                       </span>
 
                       <strong>
-                        €${part.amount.toFixed(2)}
+                        ${settings.currencySymbol}${part.amount.toFixed(2)}
                       </strong>
                     </div>
                   `
                 )
                 .join("")
             : `
-                <div class="payment-row">
-                  <span>
-                    ${
-                      selectedOrder.paymentMethod
-                        ? selectedOrder.paymentMethod.toUpperCase()
-                        : "-"
-                    }
-                  </span>
+    <div class="payment-row">
+      <span>Payment</span>
 
-                  <strong>
-                    {settings.currencySymbol}
-{selectedOrder.total.toFixed(2)}
-                  </strong>
-                </div>
-              `
+      <strong>
+        ${settings.currencySymbol}${selectedOrder.total.toFixed(2)}
+      </strong>
+    </div>
+  `
         }
 
         ${
@@ -630,29 +832,21 @@ const paidInformation =
 <div class="summary-row">
   <span>Subtotal</span>
   <strong>
-  {settings.currencySymbol}
-  {selectedOrder
-    ? (
-        selectedOrder.total /
-        (1 + settings.taxRate / 100)
-      ).toFixed(2)
-    : "0.00"}
-</strong>
+    ${settings.currencySymbol}${(
+      selectedOrder.total /
+      (1 + settings.taxRate / 100)
+    ).toFixed(2)}
+  </strong>
 </div>
 
 <div class="summary-row">
-  <span>Tax</span>
+  <span>Tax (${settings.taxRate}%)</span>
   <strong>
-    <span>
- ${settings.currencySymbol}
-  {selectedOrder
-    ? (
-        selectedOrder.total -
-        selectedOrder.total /
-(1 + settings.taxRate / 100)
-      ).toFixed(2)
-    : "0.00"}
-</span>
+    ${settings.currencySymbol}${(
+      selectedOrder.total -
+      selectedOrder.total /
+        (1 + settings.taxRate / 100)
+    ).toFixed(2)}
   </strong>
 </div>
 
@@ -662,7 +856,7 @@ const paidInformation =
   <span>TOTAL</span>
 
   <span>
-    €${selectedOrder.total.toFixed(2)}
+    ${settings.currencySymbol}${selectedOrder.total.toFixed(2)}
   </span>
 </div>
 
@@ -713,6 +907,22 @@ const addPaymentPart = () => {
 
   const amount = Number(newPaymentAmount);
 
+  const alreadyPaid = paymentParts.reduce(
+  (sum, part) => sum + part.amount,
+  0
+);
+
+const remaining = selectedOrder
+  ? selectedOrder.total - alreadyPaid
+  : 0;
+
+if (amount > remainingAmount + 0.001) {
+  alert(
+    `Payment cannot exceed the remaining amount of ${settings.currencySymbol}${remaining.toFixed(2)}`
+  );
+  return;
+}
+
   if (!amount || amount <= 0) {
     alert("Please enter a valid amount.");
     return;
@@ -748,7 +958,7 @@ const addPaymentPart = () => {
 
   setNewPaymentAmount("");
   setTicketCode("");
-  setShowTicketScanner(false);
+  
 };
 const removePaymentPart = (id: number) => {
   setPaymentParts((current) =>
@@ -756,14 +966,15 @@ const removePaymentPart = (id: number) => {
   );
 };
   return (
+    <StaffGuard>
     <main className="min-h-screen bg-[#0d0f10] text-white">
 
       {/* HEADER */}
 
-      <header className="flex items-center gap-5 border-b border-white/10 px-5 py-4">
+      <header className="flex items-center gap-5 border-b border-white/10 px-5 py-3">
 
         <div className="min-w-[310px]">
-          <h1 className="text-3xl font-black">
+          <h1 className="text-2xl font-black">
             DINE
             <span className="text-red-500">
               VO
@@ -813,11 +1024,11 @@ const removePaymentPart = (id: number) => {
 
       {/* MAIN GRID */}
 
-      <section className="grid grid-cols-[290px_minmax(0,1fr)_390px] gap-4 p-4">
+      <section className="grid h-[570px] grid-cols-[290px_minmax(0,1fr)_390px] gap-4 p-4 pb-2">
 
         {/* LEFT OPEN ORDERS */}
 
-        <aside className="rounded-2xl border border-white/10 bg-[#131619] p-4">
+        <aside className="flex min-h-0 flex-col rounded-2xl border border-white/10 bg-[#131619] p-4">
 
           <div className="mb-4 flex items-center justify-between">
 
@@ -831,7 +1042,7 @@ const removePaymentPart = (id: number) => {
 
           </div>
 
-          <div className="space-y-3">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-2">
 
             {openOrders.map((order) => {
 
@@ -839,17 +1050,16 @@ const removePaymentPart = (id: number) => {
                 order.id ===
                 selectedOrderId;
 
-              return (
-
-                <button
-                  key={order.id}
-                  onClick={() => {
-                    setSelectedOrderId(
-                      order.id
-                    );
-
-                    setReceivedAmount("");
-                  }}
+            return (
+  <button
+    key={order.id}
+    onClick={() => {
+      setSelectedOrderId(order.id);
+      setPaymentParts([]);
+      setNewPaymentAmount("");
+      setTicketCode("");
+      setNewPaymentMethod("cash");
+    }}
                   className={`w-full rounded-xl border p-4 text-left ${
                     isSelected
                       ? "border-red-500 bg-red-500/10"
@@ -880,7 +1090,7 @@ const removePaymentPart = (id: number) => {
                     <div className="text-right">
 
                       <p className="font-black">
-                        €
+                        {settings.currencySymbol}
                         {order.total.toFixed(
                           2
                         )}
@@ -912,7 +1122,7 @@ const removePaymentPart = (id: number) => {
 
         {/* CENTER ORDER DETAILS */}
 
-        <section className="rounded-2xl border border-white/10 bg-[#131619] p-5">
+        <section className="min-h-0 overflow-y-auto rounded-2xl border border-white/10 bg-[#131619] p-5">
 
           {!selectedOrder ? (
 
@@ -932,7 +1142,7 @@ const removePaymentPart = (id: number) => {
                     TABLE
                   </p>
 
-                  <h2 className="text-5xl font-black">
+                  <h2 className="text-2xl font-black">
                     {
                       selectedOrder.tableNumber
                     }
@@ -968,7 +1178,7 @@ const removePaymentPart = (id: number) => {
 
   </div>
 
-  <p className="text-2xl font-bold">
+  <p className="text-xl font-bold">
     Order #{selectedOrder.orderNumber}
   </p>
 
@@ -1037,7 +1247,7 @@ const removePaymentPart = (id: number) => {
                                 </div>
 
                                 <strong>
-                                  €
+                                  {settings.currencySymbol}
                                   {(
                                     item.price *
                                     item.quantity
@@ -1058,7 +1268,7 @@ const removePaymentPart = (id: number) => {
                             </span>
 
                             <strong className="text-red-400">
-                              €
+                              {settings.currencySymbol}
                               {guestTotal.toFixed(
                                 2
                               )}
@@ -1082,8 +1292,8 @@ const removePaymentPart = (id: number) => {
                   TOTAL AMOUNT
                 </span>
 
-                <span className="text-3xl font-black">
-                  €
+                <span className="text-2xl font-black">
+                  {settings.currencySymbol}
                   {selectedOrder.total.toFixed(
                     2
                   )}
@@ -1099,11 +1309,16 @@ const removePaymentPart = (id: number) => {
 
         {/* RIGHT PAYMENT */}
 
-        <aside className="rounded-2xl border border-white/10 bg-[#131619] p-5">
+        <aside className="min-h-0 overflow-y-auto rounded-2xl border border-white/10 bg-[#131619] p-5">
 
           <h2 className="text-xl font-black">
             PAYMENT
           </h2>
+          {selectedOrder?.paymentStatus === "paid" && (
+  <div className="mt-4 rounded-xl border border-green-500/20 bg-green-500/10 p-3 text-sm font-bold text-green-400">
+    This order is already paid. Payment editing is locked.
+  </div>
+)}
 <p className="mt-6 text-sm text-gray-400">
   Add Payment
 </p>
@@ -1129,13 +1344,15 @@ const removePaymentPart = (id: number) => {
         );
 
         if (method.value === "ticket") {
-          setShowTicketScanner(true);
+         
         } else {
-          setShowTicketScanner(false);
+        
         }
       }}
+      disabled={selectedOrder?.paymentStatus === "paid"}
       className={`rounded-xl border px-2 py-4 text-center transition ${
         newPaymentMethod === method.value
+        
           ? "border-green-500 bg-green-500/10"
           : "border-white/10 bg-[#1a1e21]"
       }`}
@@ -1181,6 +1398,10 @@ const removePaymentPart = (id: number) => {
           remainingAmount.toFixed(2)
         )
       }
+      disabled={
+  !selectedOrder ||
+  selectedOrder.paymentStatus === "paid"
+}
       className="rounded-xl border border-white/10 bg-[#1a1e21] px-4 text-xs font-bold"
     >
       FULL
@@ -1204,20 +1425,23 @@ const removePaymentPart = (id: number) => {
         className="min-w-0 flex-1 rounded-xl border border-white/10 bg-[#0d0f10] px-4 py-3 text-white outline-none"
       />
 
-      <button
-        type="button"
-        onClick={() => setShowTicketScanner(true)}
-        className="rounded-xl bg-white px-4 py-3 font-bold text-black"
-      >
-        📷 Scan
-      </button>
+    <button
+  type="button"
+  className="rounded-xl bg-white px-4 py-3 font-bold text-black"
+>
+  📷 Scan
+</button>
     </div>
   </div>
 )}
 
 <button
   onClick={addPaymentPart}
-  disabled={!selectedOrder || remainingAmount <= 0}
+  disabled={
+  !selectedOrder ||
+  selectedOrder.paymentStatus === "paid" ||
+  remainingAmount <= 0
+}
   className="mt-4 w-full rounded-xl bg-red-600 px-4 py-3 font-bold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
 >
   + ADD PAYMENT
@@ -1294,27 +1518,30 @@ const removePaymentPart = (id: number) => {
               </span>
 
               <strong>
-                €
-               {selectedOrder
-  ? (selectedOrder.total /
-(1 + settings.taxRate / 100)).toFixed(2)
-  : "0.00"}
-              </strong>
+  {settings.currencySymbol}
+  {selectedOrder
+    ? (
+        selectedOrder.total /
+        (1 + settings.taxRate / 100)
+      ).toFixed(2)
+    : "0.00"}
+</strong>
 
             </div>
 
             <div className="mt-3 flex justify-between text-gray-400">
 
   <span>
-    Tax (10%)
+    Tax ({settings.taxRate}%)
   </span>
 
   <span>
-    €
+    {settings.currencySymbol}
     {selectedOrder
       ? (
           selectedOrder.total -
-          selectedOrder.total / 1.1
+          selectedOrder.total /
+            (1 + settings.taxRate / 100)
         ).toFixed(2)
       : "0.00"}
   </span>
@@ -1338,48 +1565,14 @@ const removePaymentPart = (id: number) => {
 
           </div>
 
-          {paymentMethod === "cash" && (
-
-            <>
-
-              <p className="mt-6 text-sm text-gray-400">
-                Received Amount
-              </p>
-
-              <input
-                type="number"
-                value={receivedAmount}
-                onChange={(e) =>
-                  setReceivedAmount(
-                    e.target.value
-                  )
-                }
-                placeholder="0.00"
-                className="mt-2 w-full rounded-xl border border-white/10 bg-[#1a1e21] px-5 py-4 text-xl outline-none"
-              />
-
-              <div className="mt-5 flex justify-between border-t border-white/10 pt-5">
-
-                <span>
-                  Change
-                </span>
-
-                <strong className="text-2xl text-green-500">
-                  €
-                  {selectedOrder && selectedOrder.paymentMethod === "cash"
-  ? (selectedOrder.change || 0).toFixed(2)
-  : "0.00"}
-                </strong>
-
-              </div>
-
-            </>
-
-          )}
+         
 
           <button
             onClick={completePayment}
-            disabled={!selectedOrder}
+           disabled={
+  !selectedOrder ||
+  selectedOrder.paymentStatus === "paid"
+}
             className="mt-7 w-full rounded-xl bg-green-600 py-4 text-lg font-black hover:bg-green-700 disabled:bg-gray-700"
           >
             ✓ COMPLETE PAYMENT
@@ -1391,9 +1584,9 @@ const removePaymentPart = (id: number) => {
 
       {/* BOTTOM */}
 
-      <section className="grid grid-cols-[290px_minmax(0,1fr)] gap-4 px-4 pb-4">
+      <section className="grid grid-cols-[290px_minmax(0,1fr)] gap-4 px-4 pb-4 pt-2">
 
-        {/* QUICK ACTIONS */}
+        
 
       {/* QUICK ACTIONS */}
 
@@ -1459,110 +1652,34 @@ const removePaymentPart = (id: number) => {
 
           </div>
 
-          <div className="mt-4 flex gap-3 overflow-x-auto">
+          <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
 
-            {todayPaidOrders.length ===
-            0 ? (
-
-              <div className="rounded-xl bg-[#1a1e21] px-5 py-4 text-sm text-gray-500">
+            {todayPaidOrders.length === 0 ? (
+              <div className="rounded-lg bg-[#1a1e21] px-4 py-3 text-sm text-gray-500">
                 No paid orders yet today.
               </div>
-
             ) : (
+              todayPaidOrders.map((order) => (
+                <button
+                  key={order.id}
+                  onClick={() => {
+  setSelectedOrderId(order.id);
 
-              todayPaidOrders.map(
-                (order) => (
-
-                  <button
-  key={order.id}
-  onClick={() => {
-    setSelectedOrderId(order.id);
-    setReceivedAmount("");
-  }}
-  className={`min-w-[210px] rounded-xl p-4 text-left ${
-    selectedOrderId === order.id
-      ? "border border-green-500 bg-green-500/10"
-      : "bg-[#1a1e21]"
-  }`}
->
-
-                    <div className="flex justify-between">
-
-                      <strong>
-                        Table{" "}
-                        {
-                          order.tableNumber
-                        }
-                      </strong>
-
-                      <span className="text-green-500">
-                        PAID
-                      </span>
-
-                    </div>
-
-                    <p className="mt-2 text-sm text-gray-400">
-                      Order #
-                      {
-                        order.orderNumber
-                      }
-                    </p>
-
-<div className="mt-3 space-y-1">
-  {order.paymentBreakdown && order.paymentBreakdown.length > 0 ? (
-    order.paymentBreakdown.map((part) => (
-      <div
-        key={part.id}
-        className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2 text-xs"
-      >
-        <span className="font-bold capitalize text-gray-300">
-          {part.method === "ticket"
-            ? "Ticket Restaurant"
-            : part.method}
-        </span>
-
-        <span className="font-black text-white">
-          {settings.currencySymbol}
-          {part.amount.toFixed(2)}
-        </span>
-      </div>
-    ))
-  ) : (
-    <span className="inline-block rounded-lg bg-white/5 px-3 py-1 text-xs font-black uppercase text-gray-300">
-      {order.paymentMethod || "Unknown"}
-    </span>
-  )}
-</div>
-
-                    <div className="mt-3 flex justify-between">
-
-                      <strong>
-                        €
-                        {order.total.toFixed(
-                          2
-                        )}
-                      </strong>
-
-                      <span className="text-xs text-gray-500">
-                        {new Date(
-                          order.paidAt as number
-                        ).toLocaleTimeString(
-                          [],
-                          {
-                            hour: "2-digit",
-                            minute:
-                              "2-digit",
-                          }
-                        )}
-                      </span>
-
-                    </div>
-
-                  </button>
-
-                )
-              )
-
+  setPaymentParts([]);
+  setNewPaymentAmount("");
+  setTicketCode("");
+  setNewPaymentMethod("cash");
+}}
+                  className={`shrink-0 rounded-lg border px-4 py-3 text-left ${
+                    selectedOrderId === order.id
+                      ? "border-green-500 bg-green-500/10"
+                      : "border-white/10 bg-[#1a1e21]"
+                  }`}
+                >
+                  <span className="text-xs text-gray-500">Order</span>
+                  <p className="font-black text-white">#{order.orderNumber}</p>
+                </button>
+              ))
             )}
 
           </div>
@@ -1571,106 +1688,9 @@ const removePaymentPart = (id: number) => {
 
       </section>
 
-{receipt && (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
 
-    <div className="w-full max-w-md rounded-3xl bg-white p-7 text-black shadow-2xl">
-
-      <div className="text-center">
-
-        <p className="text-sm font-bold text-red-600">
-          DINEVO
-        </p>
-
-        <h2 className="mt-2 text-2xl font-black">
-          Payment Complete
-        </h2>
-
-        <p className="mt-2 text-sm text-gray-500">
-          Receipt for Order #{receipt.orderNumber}
-        </p>
-
-      </div>
-
-      <div className="mt-6 space-y-3 rounded-2xl bg-gray-100 p-5">
-
-        <div className="flex justify-between">
-          <span>Table</span>
-          <strong>
-            {receipt.tableNumber}
-          </strong>
-        </div>
-
-        <div className="flex justify-between">
-          <span>Payment Method</span>
-          <strong className="capitalize">
-            {receipt.paymentMethod}
-          </strong>
-        </div>
-
-        <div className="flex justify-between">
-          <span>Total Paid</span>
-          <strong>
-            €{receipt.total.toFixed(2)}
-          </strong>
-        </div>
-
-        {receipt.paymentMethod === "cash" && (
-          <>
-            <div className="flex justify-between">
-              <span>Received</span>
-              <strong>
-                €{(receipt.received || 0).toFixed(2)}
-              </strong>
-            </div>
-
-            <div className="flex justify-between">
-              <span>Change</span>
-              <strong className="text-green-600">
-                €{(receipt.change || 0).toFixed(2)}
-              </strong>
-            </div>
-          </>
-        )}
-
-        <div className="flex justify-between">
-          <span>Time</span>
-          <strong>
-            {new Date(receipt.paidAt).toLocaleTimeString(
-              [],
-              {
-                hour: "2-digit",
-                minute: "2-digit",
-              }
-            )}
-          </strong>
-        </div>
-
-      </div>
-
-      <div className="mt-6 flex gap-3">
-
-        <button
-          onClick={() => window.print()}
-          className="flex-1 rounded-xl bg-black py-3 font-bold text-white"
-        >
-          Print Receipt
-        </button>
-
-        <button
-          onClick={() => setReceipt(null)}
-          className="flex-1 rounded-xl bg-green-600 py-3 font-bold text-white"
-        >
-          Close
-        </button>
-
-      </div>
-
-    </div>
-
-  </div>
-)}
 
     </main>
+    </StaffGuard>
   );
 }

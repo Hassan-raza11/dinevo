@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
 type MenuItem = {
   id: number;
@@ -11,13 +12,14 @@ type MenuItem = {
   description: string;
   image: string;
   vegetarian?: boolean;
+  station?: "kitchen" | "pizza" | "bar";
 };
 
 type CartItem = MenuItem & {
   quantity: number;
 };
 
-const categories = [
+const fallbackCategories = [
   "All Dishes",
   "Restaurant Special",
   "Starters",
@@ -30,11 +32,12 @@ const categories = [
   "Desserts",
 ];
 
-const menu: MenuItem[] = [
+const fallbackMenu: MenuItem[] = [
   {
     id: 1,
     name: "Chicken Karahi",
     category: "Main Course",
+    station: "kitchen",
     price: 15.9,
     description:
       "Traditional chicken karahi cooked with tomato, ginger, garlic and fresh spices.",
@@ -46,6 +49,7 @@ const menu: MenuItem[] = [
     id: 2,
     name: "Bruschetta",
     category: "Starters",
+    station: "kitchen",
     price: 6.5,
     description:
       "Grilled bread topped with tomatoes, garlic, olive oil and fresh herbs.",
@@ -58,6 +62,7 @@ const menu: MenuItem[] = [
     id: 3,
     name: "Pasta Alfredo",
     category: "Pasta",
+    station: "kitchen",
     price: 8.9,
     description:
       "Creamy Alfredo pasta finished with parmesan cheese and herbs.",
@@ -70,6 +75,7 @@ const menu: MenuItem[] = [
     id: 4,
     name: "Beef Burger",
     category: "Burgers",
+    station: "kitchen",
     price: 9.9,
     description:
       "Grilled beef patty with cheese, lettuce, tomato and house sauce.",
@@ -81,6 +87,7 @@ const menu: MenuItem[] = [
     id: 5,
     name: "Margherita Pizza",
     category: "Pizza",
+    station: "pizza",
     price: 11.9,
     description:
       "Classic pizza with tomato sauce, mozzarella and fresh basil.",
@@ -93,6 +100,7 @@ const menu: MenuItem[] = [
     id: 6,
     name: "Grilled Salmon",
     category: "Restaurant Special",
+    station: "kitchen",
     price: 16.9,
     description:
       "Fresh salmon grilled with herbs and served with seasonal vegetables.",
@@ -104,6 +112,7 @@ const menu: MenuItem[] = [
     id: 7,
     name: "Coca-Cola",
     category: "Drinks",
+    station: "bar",
     price: 2.5,
     description:
       "Ice-cold classic Coca-Cola.",
@@ -115,6 +124,7 @@ const menu: MenuItem[] = [
     id: 8,
     name: "Mineral Water",
     category: "Drinks",
+    station: "bar",
     price: 3.0,
     description:
       "Refreshing chilled mineral water.",
@@ -126,6 +136,7 @@ const menu: MenuItem[] = [
     id: 9,
     name: "Mango Smoothie",
     category: "Smoothies",
+    station: "bar",
     price: 6.5,
     description:
       "Fresh mango blended into a smooth and refreshing drink.",
@@ -137,6 +148,7 @@ const menu: MenuItem[] = [
     id: 10,
     name: "Chocolate Cake",
     category: "Desserts",
+    station: "kitchen",
     price: 7.5,
     description:
       "Rich chocolate cake with a soft chocolate center.",
@@ -146,15 +158,309 @@ const menu: MenuItem[] = [
   },
 ];
 
+const translations = {
+  en: {
+    table: "Table",
+    dineIn: "Dine In",
+    takeaway: "Take Away",
+    menu: "MENU",
+    guests: "GUESTS",
+
+    categories: {
+      "All Dishes": "All Dishes",
+      "Restaurant Special": "Restaurant Special",
+      Starters: "Starters",
+      "Main Course": "Main Course",
+      Pasta: "Pasta",
+      Pizza: "Pizza",
+      Burgers: "Burgers",
+      Drinks: "Drinks",
+      Smoothies: "Smoothies",
+      Desserts: "Desserts",
+    },
+
+    guest: "+ Guest",
+    guestName: "Guest name",
+    add: "Add",
+    cancel: "Cancel",
+    selectGuest:
+      "Please select or add a guest before adding food.",
+
+    addGuest: "+ Add Guest",
+    item: "item",
+    items: "items",
+
+    tableTotal: "Table Total",
+    tableOrder: "Table Order",
+    confirmOrder: "Confirm Order",
+
+    vegetarian: "Vegetarian",
+    backToMenu: "Back to Menu",
+
+    order: "Order",
+    confirmSend: "Confirm & Send",
+
+    currentOrder: "Current Order",
+    noItems: "No items added yet.",
+    remove: "Remove",
+    total: "Total",
+  },
+
+  fr: {
+    table: "Table",
+    dineIn: "Sur place",
+    takeaway: "À emporter",
+    menu: "MENU",
+    guests: "CLIENTS",
+
+    categories: {
+      "All Dishes": "Tous les plats",
+      "Restaurant Special": "Spécialité du restaurant",
+      Starters: "Entrées",
+      "Main Course": "Plats principaux",
+      Pasta: "Pâtes",
+      Pizza: "Pizza",
+      Burgers: "Burgers",
+      Drinks: "Boissons",
+      Smoothies: "Smoothies",
+      Desserts: "Desserts",
+    },
+
+    guest: "+ Client",
+    guestName: "Nom du client",
+    add: "Ajouter",
+    cancel: "Annuler",
+    selectGuest:
+      "Veuillez sélectionner ou ajouter un client avant d'ajouter des plats.",
+
+    addGuest: "+ Ajouter un client",
+    item: "article",
+    items: "articles",
+
+    tableTotal: "Total de la table",
+    tableOrder: "Commande de la table",
+    confirmOrder: "Confirmer la commande",
+
+    vegetarian: "Végétarien",
+    backToMenu: "Retour au menu",
+
+    order: "Commande",
+    confirmSend: "Confirmer et envoyer",
+
+    currentOrder: "Commande actuelle",
+    noItems: "Aucun article ajouté.",
+    remove: "Supprimer",
+    total: "Total",
+  },
+
+  es: {
+    table: "Mesa",
+    dineIn: "Comer aquí",
+    takeaway: "Para llevar",
+    menu: "MENÚ",
+    guests: "CLIENTES",
+
+    categories: {
+      "All Dishes": "Todos los platos",
+      "Restaurant Special": "Especialidad del restaurante",
+      Starters: "Entrantes",
+      "Main Course": "Platos principales",
+      Pasta: "Pasta",
+      Pizza: "Pizza",
+      Burgers: "Hamburguesas",
+      Drinks: "Bebidas",
+      Smoothies: "Batidos",
+      Desserts: "Postres",
+    },
+
+    guest: "+ Cliente",
+    guestName: "Nombre del cliente",
+    add: "Añadir",
+    cancel: "Cancelar",
+    selectGuest:
+      "Seleccione o añada un cliente antes de añadir comida.",
+
+    addGuest: "+ Añadir cliente",
+    item: "artículo",
+    items: "artículos",
+
+    tableTotal: "Total de la mesa",
+    tableOrder: "Pedido de la mesa",
+    confirmOrder: "Confirmar pedido",
+
+    vegetarian: "Vegetariano",
+    backToMenu: "Volver al menú",
+
+    order: "Pedido",
+    confirmSend: "Confirmar y enviar",
+
+    currentOrder: "Pedido actual",
+    noItems: "Todavía no hay artículos.",
+    remove: "Eliminar",
+    total: "Total",
+  },
+
+  de: {
+    table: "Tisch",
+    dineIn: "Vor Ort",
+    takeaway: "Zum Mitnehmen",
+    menu: "MENÜ",
+    guests: "GÄSTE",
+
+    categories: {
+      "All Dishes": "Alle Gerichte",
+      "Restaurant Special": "Spezialität des Hauses",
+      Starters: "Vorspeisen",
+      "Main Course": "Hauptgerichte",
+      Pasta: "Pasta",
+      Pizza: "Pizza",
+      Burgers: "Burger",
+      Drinks: "Getränke",
+      Smoothies: "Smoothies",
+      Desserts: "Desserts",
+    },
+
+    guest: "+ Gast",
+    guestName: "Name des Gastes",
+    add: "Hinzufügen",
+    cancel: "Abbrechen",
+    selectGuest:
+      "Bitte wählen oder fügen Sie einen Gast hinzu, bevor Sie Essen hinzufügen.",
+
+    addGuest: "+ Gast hinzufügen",
+    item: "Artikel",
+    items: "Artikel",
+
+    tableTotal: "Tischsumme",
+    tableOrder: "Tischbestellung",
+    confirmOrder: "Bestellung bestätigen",
+
+    vegetarian: "Vegetarisch",
+    backToMenu: "Zurück zum Menü",
+
+    order: "Bestellung",
+    confirmSend: "Bestätigen und senden",
+
+    currentOrder: "Aktuelle Bestellung",
+    noItems: "Noch keine Artikel hinzugefügt.",
+    remove: "Entfernen",
+    total: "Gesamt",
+  },
+
+  it: {
+    table: "Tavolo",
+    dineIn: "Mangia qui",
+    takeaway: "Da asporto",
+    menu: "MENU",
+    guests: "CLIENTI",
+
+    categories: {
+      "All Dishes": "Tutti i piatti",
+      "Restaurant Special": "Specialità del ristorante",
+      Starters: "Antipasti",
+      "Main Course": "Piatti principali",
+      Pasta: "Pasta",
+      Pizza: "Pizza",
+      Burgers: "Hamburger",
+      Drinks: "Bevande",
+      Smoothies: "Frullati",
+      Desserts: "Dolci",
+    },
+
+    guest: "+ Cliente",
+    guestName: "Nome del cliente",
+    add: "Aggiungi",
+    cancel: "Annulla",
+    selectGuest:
+      "Seleziona o aggiungi un cliente prima di aggiungere il cibo.",
+
+    addGuest: "+ Aggiungi cliente",
+    item: "articolo",
+    items: "articoli",
+
+    tableTotal: "Totale tavolo",
+    tableOrder: "Ordine del tavolo",
+    confirmOrder: "Conferma ordine",
+
+    vegetarian: "Vegetariano",
+    backToMenu: "Torna al menu",
+
+    order: "Ordine",
+    confirmSend: "Conferma e invia",
+
+    currentOrder: "Ordine attuale",
+    noItems: "Nessun articolo aggiunto.",
+    remove: "Rimuovi",
+    total: "Totale",
+  },
+
+  ar: {
+    table: "الطاولة",
+    dineIn: "تناول الطعام هنا",
+    takeaway: "طلب سفري",
+    menu: "القائمة",
+    guests: "الضيوف",
+
+    categories: {
+      "All Dishes": "جميع الأطباق",
+      "Restaurant Special": "طبق المطعم المميز",
+      Starters: "المقبلات",
+      "Main Course": "الأطباق الرئيسية",
+      Pasta: "المعكرونة",
+      Pizza: "البيتزا",
+      Burgers: "البرغر",
+      Drinks: "المشروبات",
+      Smoothies: "العصائر",
+      Desserts: "الحلويات",
+    },
+
+    guest: "+ ضيف",
+    guestName: "اسم الضيف",
+    add: "إضافة",
+    cancel: "إلغاء",
+    selectGuest:
+      "يرجى اختيار ضيف أو إضافة ضيف قبل إضافة الطعام.",
+
+    addGuest: "+ إضافة ضيف",
+    item: "عنصر",
+    items: "عناصر",
+
+    tableTotal: "إجمالي الطاولة",
+    tableOrder: "طلب الطاولة",
+    confirmOrder: "تأكيد الطلب",
+
+    vegetarian: "نباتي",
+    backToMenu: "العودة إلى القائمة",
+
+    order: "الطلب",
+    confirmSend: "تأكيد وإرسال",
+
+    currentOrder: "الطلب الحالي",
+    noItems: "لم تتم إضافة أي عناصر بعد.",
+    remove: "حذف",
+    total: "الإجمالي",
+  },
+};
+
 export default function Home() {
   const router = useRouter();
 
   const [tableNumber, setTableNumber] = useState("");
   const [serviceType, setServiceType] = useState("");
   const [language, setLanguage] = useState("en");
+const text =
+  translations[
+    language as keyof typeof translations
+  ] || translations.en;
 
   const [category, setCategory] = useState("All Dishes");
   const [search, setSearch] = useState("");
+
+  const [menuItems, setMenuItems] =
+    useState<MenuItem[]>(fallbackMenu);
+
+  const [menuCategories, setMenuCategories] =
+    useState<string[]>(fallbackCategories);
 
   const [people, setPeople] = useState<string[]>([]);
   const [selectedPerson, setSelectedPerson] =
@@ -173,7 +479,8 @@ export default function Home() {
 
   const [infoItem, setInfoItem] =
     useState<MenuItem | null>(null);
-
+const [isConfirmingOrder, setIsConfirmingOrder] =
+  useState(false);
   useEffect(() => {
     const savedTable =
       localStorage.getItem("dinevo-table-number");
@@ -188,6 +495,111 @@ export default function Home() {
     if (savedService) setServiceType(savedService);
     if (savedLanguage) setLanguage(savedLanguage);
   }, []);
+
+  useEffect(() => {
+    const loadMenuFromSupabase = async () => {
+      const {
+        data: categoryData,
+        error: categoryError,
+      } = await supabase
+        .from("menu_categories")
+        .select("id, name, display_order, active")
+        .eq("active", true)
+        .order("display_order", { ascending: true });
+
+      if (categoryError) {
+        console.error(
+          "Menu categories load error:",
+          categoryError
+        );
+      } else if (categoryData) {
+        setMenuCategories([
+          "All Dishes",
+          ...categoryData.map(
+            (item: any) => item.name
+          ),
+        ]);
+      }
+
+      const {
+        data: itemData,
+        error: itemError,
+      } = await supabase
+        .from("menu_items")
+        .select(`
+          id,
+          name,
+          description,
+          price,
+          image_url,
+          vegetarian,
+          station,
+          display_order,
+          active,
+          menu_categories (
+            name
+          )
+        `)
+        .eq("active", true)
+        .order("display_order", { ascending: true });
+
+      if (itemError) {
+        console.error(
+          "Menu items load error:",
+          itemError
+        );
+        return;
+      }
+
+      if (!itemData) return;
+
+      const mappedMenu: MenuItem[] =
+        itemData.map((item: any) => {
+          const fallback =
+            fallbackMenu.find(
+              (oldItem) =>
+                oldItem.name === item.name
+            );
+
+          return {
+            id: Number(item.id),
+            name: item.name,
+            category:
+              item.menu_categories?.name ||
+              fallback?.category ||
+              "Other",
+            price: Number(item.price),
+            description:
+              item.description ||
+              fallback?.description ||
+              "",
+            image:
+              item.image_url ||
+              fallback?.image ||
+              "",
+            vegetarian:
+              Boolean(item.vegetarian),
+            station:
+              item.station === "pizza" ||
+              item.station === "bar"
+                ? item.station
+                : "kitchen",
+          };
+        });
+
+      setMenuItems(mappedMenu);
+    };
+
+    loadMenuFromSupabase();
+
+const interval = setInterval(() => {
+  loadMenuFromSupabase();
+}, 3000);
+
+return () => {
+  clearInterval(interval);
+};
+}, []);
 
   const addGuest = () => {
     const name = newGuestName.trim();
@@ -314,7 +726,7 @@ export default function Home() {
   }, [orders]);
 
   const filteredMenu =
-    menu.filter((item) => {
+    menuItems.filter((item) => {
       const categoryMatches =
         category === "All Dishes" ||
         item.category === category;
@@ -330,8 +742,11 @@ export default function Home() {
       return categoryMatches && searchMatches;
     });
 
-  const confirmOrder = () => {
+  const confirmOrder = async () => {
+  if (isConfirmingOrder) return;
   if (tableTotal === 0) return;
+
+  setIsConfirmingOrder(true);
 
   const kitchenOrder = {
     id: Date.now(),
@@ -340,7 +755,7 @@ export default function Home() {
     serviceType,
     language,
     createdAt: Date.now(),
-    status: "new",
+   
 
     guests: people.map((person, personIndex) => ({
       guestName: person,
@@ -351,15 +766,8 @@ export default function Home() {
         quantity: item.quantity,
         price: item.price,
 
-        // For now we will route all normal dishes to kitchen.
-        // Later we will change this item-by-item.
-        station:
-          item.category === "Pizza"
-            ? "pizza"
-            : item.category === "Drinks" ||
-              item.category === "Smoothies"
-            ? "bar"
-            : "kitchen",
+        // Route using the station configured in Supabase.
+        station: item.station || "kitchen",
 
         done: false,
       })),
@@ -368,30 +776,89 @@ export default function Home() {
     total: tableTotal,
   };
 
-  // Get any previous restaurant orders
-  const existingOrders = JSON.parse(
-    localStorage.getItem("dinevo-orders") || "[]"
-  );
-
-  // Add this new order
-  const updatedOrders = [
-    ...existingOrders,
-    kitchenOrder,
-  ];
-
-  // Save all orders
-  localStorage.setItem(
-    "dinevo-orders",
-    JSON.stringify(updatedOrders)
-  );
+  
 
   // Keep this because the thank-you page currently reads it
   localStorage.setItem(
-    "dinevo-confirmed-order",
-    JSON.stringify(kitchenOrder)
+  "dinevo-confirmed-order",
+  JSON.stringify(kitchenOrder)
+);
+
+// SAVE ORDER TO SUPABASE
+try {
+  const { data: supabaseOrder, error: orderError } =
+    await supabase
+      .from("orders")
+      .insert({
+        order_number: String(kitchenOrder.orderNumber),
+        table_number: String(kitchenOrder.tableNumber),
+        service_type: "dine-in",
+        total: kitchenOrder.total,
+        kitchen_status: "pending",
+        waiter_status: "waiting",
+        payment_status: "unpaid",
+      })
+      .select("id")
+      .single();
+
+  if (orderError) {
+    throw orderError;
+  }
+
+  for (const guest of kitchenOrder.guests) {
+    const { data: supabaseGuest, error: guestError } =
+      await supabase
+        .from("order_guests")
+        .insert({
+          order_id: supabaseOrder.id,
+          guest_name: guest.guestName,
+        })
+        .select("id")
+        .single();
+
+    if (guestError) {
+      throw guestError;
+    }
+
+    const items = guest.items.map((item: any) => ({
+      order_id: supabaseOrder.id,
+      guest_id: supabaseGuest.id,
+      item_name: item.name,
+      price: item.price,
+      quantity: item.quantity,
+      station: item.station || "kitchen",
+    }));
+
+    if (items.length > 0) {
+      const { error: itemsError } = await supabase
+        .from("order_items")
+        .insert(items);
+
+      if (itemsError) {
+        throw itemsError;
+      }
+    }
+  }
+
+  console.log(
+    "Order successfully saved to Supabase:",
+    supabaseOrder.id
+  );
+} catch (error) {
+  console.error(
+    "Supabase order save failed:",
+    error
   );
 
-  router.push("/thank-you");
+  alert(
+    "Could not confirm your order. Please try again."
+  );
+
+  setIsConfirmingOrder(false);
+  return;
+}
+
+router.push("/thank-you");
 };
 
     
@@ -421,13 +888,13 @@ export default function Home() {
         <div className="flex gap-10 text-lg font-bold">
 
           <span>
-            Table {tableNumber || "—"}
+            {text.table} {tableNumber || "—"}
           </span>
 
           <span>
             {serviceType === "takeaway"
-              ? "Take Away"
-              : "Dine In"}
+  ? text.takeaway
+  : text.dineIn}
           </span>
 
         </div>
@@ -459,15 +926,17 @@ export default function Home() {
         <aside className="bg-[#111214] p-3 text-white">
 
           <h2 className="mb-4 px-2 text-sm font-bold">
-            MENU
+           {text.menu}
           </h2>
 
           <div className="space-y-2">
 
-            {categories.map((item) => (
+            {menuCategories.map((item) => (
 
               <button
-                key={item}
+                key={text.categories[
+  item as keyof typeof text.categories
+]}
                 onClick={() => setCategory(item)}
                 className={`w-full rounded-lg px-3 py-3 text-left text-xs font-semibold ${
                   category === item
@@ -475,7 +944,9 @@ export default function Home() {
                     : "bg-[#222326] hover:bg-[#303135]"
                 }`}
               >
-                {item}
+                {text.categories[
+                  item as keyof typeof text.categories
+                ] || item}
               </button>
 
             ))}
@@ -506,7 +977,7 @@ export default function Home() {
                     }
                     className="rounded-xl bg-black px-5 py-3 font-bold text-white"
                   >
-                    + Guest
+                    {text.guest}
                   </button>
 
                 )}
@@ -524,7 +995,7 @@ export default function Home() {
                         e.target.value
                       )
                     }
-                    placeholder="Guest name"
+                    placeholder={text.guestName}
                     className="rounded-xl border-2 border-black bg-white px-4 py-3 font-semibold text-black placeholder:text-gray-500 outline-none focus:border-red-600"
                   />
 
@@ -532,7 +1003,7 @@ export default function Home() {
                     onClick={addGuest}
                     className="rounded-xl bg-red-600 px-5 font-bold text-white"
                   >
-                    Add
+                   {text.add}
                   </button>
 
                   <button
@@ -541,7 +1012,7 @@ export default function Home() {
                     }
                     className="rounded-xl bg-gray-200 px-4"
                   >
-                    Cancel
+                   {text.cancel}
                   </button>
 
                 </div>
@@ -551,7 +1022,7 @@ export default function Home() {
               {selectedPerson === null && (
 
                 <div className="mb-5 rounded-xl bg-red-50 p-3 text-sm text-red-700">
-                  Please select or add a guest before adding food.
+                  {text.selectGuest}
                 </div>
 
               )}
@@ -646,6 +1117,7 @@ export default function Home() {
               onBack={() =>
                 setViewingGuestOrder(null)
               }
+              text={text}
             />
 
           )}
@@ -657,7 +1129,7 @@ export default function Home() {
         <aside className="bg-[#111214] p-3 text-white">
 
           <h2 className="mb-4 text-sm font-bold">
-            GUESTS
+          {text.guests}
           </h2>
 
           <div className="space-y-2">
@@ -693,7 +1165,7 @@ export default function Home() {
                   </p>
 
                   <p className="mt-1 text-xs font-bold text-white">
-  {count} {count === 1 ? "item" : "items"}
+  {count} {count === 1 ? text.item : text.items}
 </p>
 
                 </button>
@@ -709,13 +1181,13 @@ export default function Home() {
             }
             className="mt-3 w-full rounded-lg border border-dashed border-gray-600 py-3 text-xs"
           >
-            + Add Guest
+          {text.addGuest}
           </button>
 
           <div className="mt-6 border-t border-white/10 pt-4">
 
             <p className="text-xs text-gray-500">
-              Table Total
+              {text.tableTotal}
             </p>
 
             <p className="mt-1 text-xl font-black text-red-500">
@@ -731,16 +1203,21 @@ export default function Home() {
             disabled={tableTotal === 0}
             className="mt-5 w-full rounded-lg border border-white/20 py-3 text-xs font-bold disabled:opacity-30"
           >
-            Table Order
+            {text.tableOrder}
           </button>
 
           <button
-            onClick={confirmOrder}
-            disabled={tableTotal === 0}
-            className="mt-2 w-full rounded-lg bg-red-600 py-3 text-xs font-bold disabled:bg-gray-700"
-          >
-            Confirm Order
-          </button>
+  onClick={confirmOrder}
+  disabled={
+    tableTotal === 0 ||
+    isConfirmingOrder
+  }
+  className="mt-2 w-full rounded-lg bg-red-600 py-3 text-xs font-bold disabled:cursor-not-allowed disabled:bg-gray-700"
+>
+  {isConfirmingOrder
+    ? "CONFIRMING..."
+    : text.confirmOrder}
+</button>
 
         </aside>
 
@@ -781,7 +1258,7 @@ export default function Home() {
               {infoItem.vegetarian && (
 
                 <p className="mt-4 text-sm font-bold text-green-600">
-                  ● Vegetarian
+                  ● {text.vegetarian}
                 </p>
 
               )}
@@ -792,7 +1269,7 @@ export default function Home() {
                 }
                 className="mt-6 w-full rounded-xl bg-black py-3 font-bold text-white"
               >
-                Back to Menu
+                {text.backToMenu}
               </button>
 
             </div>
@@ -820,7 +1297,7 @@ export default function Home() {
                 </p>
 
                 <h2 className="text-3xl font-bold">
-                  Table {tableNumber} Order
+                  {text.table} {tableNumber} {text.order}
                 </h2>
 
               </div>
@@ -887,7 +1364,7 @@ export default function Home() {
             <div className="mt-6 flex justify-between rounded-xl bg-black p-5 text-white">
 
               <strong>
-                Table Total
+               {text.tableTotal}
               </strong>
 
               <strong className="text-xl text-red-500">
@@ -904,15 +1381,18 @@ export default function Home() {
                 }
                 className="flex-1 rounded-xl border py-3 font-bold"
               >
-                Back to Menu
+                {text.backToMenu}
               </button>
 
               <button
-                onClick={confirmOrder}
-                className="flex-1 rounded-xl bg-red-600 py-3 font-bold text-white"
-              >
-                Confirm & Send
-              </button>
+  onClick={confirmOrder}
+  disabled={isConfirmingOrder}
+  className="flex-1 rounded-xl bg-red-600 py-3 font-bold text-white disabled:cursor-not-allowed disabled:bg-gray-400"
+>
+  {isConfirmingOrder
+    ? "CONFIRMING..."
+    : text.confirmSend}
+</button>
 
             </div>
 
@@ -927,6 +1407,13 @@ export default function Home() {
 }
 
 type GuestOrderViewProps = {
+  text: {
+  currentOrder: string;
+  backToMenu: string;
+  noItems: string;
+  remove: string;
+  total: string;
+};
   guestName: string;
   order: CartItem[];
   personIndex: number;
@@ -957,6 +1444,7 @@ function GuestOrderView({
   onDecrease,
   onRemove,
   onBack,
+  text,
 }: GuestOrderViewProps) {
 
   const total =
@@ -975,7 +1463,7 @@ function GuestOrderView({
         <div>
 
           <p className="text-xs font-bold uppercase tracking-wider text-red-600">
-            Current Order
+           {text.currentOrder}
           </p>
 
           <h2 className="text-3xl font-bold">
@@ -988,7 +1476,7 @@ function GuestOrderView({
           onClick={onBack}
           className="rounded-xl bg-black px-5 py-3 font-bold text-white"
         >
-          ← Back to Menu
+         ← {text.backToMenu}
         </button>
 
       </div>
@@ -996,7 +1484,7 @@ function GuestOrderView({
       {order.length === 0 ? (
 
         <div className="rounded-2xl bg-white p-10 text-center text-gray-400">
-          No items added yet.
+          {text.noItems}
         </div>
 
       ) : (
@@ -1073,7 +1561,7 @@ function GuestOrderView({
                   }
                   className="text-sm font-bold text-red-600"
                 >
-                  Remove
+                 {text.remove}
                 </button>
 
               </div>
@@ -1089,7 +1577,7 @@ function GuestOrderView({
       <div className="mt-6 flex justify-between rounded-xl bg-black p-5 text-white">
 
         <strong>
-          {guestName} Total
+          {guestName} {text.total}
         </strong>
 
         <strong className="text-2xl text-red-500">

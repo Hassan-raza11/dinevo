@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import StaffGuard from "@/components/StaffGuard";
 
 type WaiterItem = {
   id?: number;
@@ -25,114 +27,173 @@ type WaiterOrder = {
 
 export default function WaiterPage() {
   const [orders, setOrders] = useState<WaiterOrder[]>([]);
+  const [servingOrderId, setServingOrderId] =
+  useState<number | null>(null);
 
   useEffect(() => {
-    const loadWaiterOrders = () => {
-      const savedOrders = JSON.parse(
-        localStorage.getItem("dinevo-orders") || "[]"
+  const loadWaiterOrders = async () => {
+    const { data, error } = await supabase
+      .from("orders")
+      .select(`
+        id,
+        order_number,
+        table_number,
+        created_at,
+        kitchen_status,
+        waiter_status,
+        payment_status,
+        order_guests (
+          id,
+          guest_name,
+          order_items (
+            id,
+            item_name,
+            quantity,
+            station
+          )
+        )
+      `)
+      .eq("kitchen_status", "completed")
+      .neq("payment_status", "paid")
+      .neq("waiter_status", "served")
+      .order("created_at", {
+        ascending: true,
+      });
+
+    if (error) {
+      console.error(
+        "Waiter Supabase load error:",
+        error
       );
+      return;
+    }
 
-      const waiterOrders: WaiterOrder[] = savedOrders
-        .filter(
-  (order: any) =>
-    order.waiterRemoved !== true &&
-    order.paymentStatus !== "paid" &&
-    (
-      order.kitchenStatus === "completed" ||
-      order.kitchenCompleted === true
-    )
-)
+    const waiterOrders: WaiterOrder[] = (
+      data || []
+    ).map((order: any) => ({
+      id: order.id,
 
-        .map((order: any) => ({
-          id: order.id,
-          tableNumber: order.tableNumber,
-          orderNumber: order.orderNumber,
-          createdAt: order.createdAt,
+      tableNumber: order.table_number,
 
-          waiterStatus:
-            order.waiterStatus || "preparing",
+      orderNumber: order.order_number,
 
-          guests: order.guests.map((guest: any) => ({
-            guestName: guest.guestName,
+      createdAt: order.created_at,
 
-            items: guest.items.map((item: any) => ({
+      waiterStatus:
+        order.waiter_status || "waiting",
+
+      guests: (order.order_guests || []).map(
+        (guest: any) => ({
+          guestName: guest.guest_name,
+
+          items: (guest.order_items || []).map(
+            (item: any) => ({
               id: item.id,
-              name: item.name,
+              name: item.item_name,
               quantity: item.quantity,
               station: item.station,
-            })),
-          })),
-        }));
+            })
+          ),
+        })
+      ),
+    }));
 
-      setOrders(waiterOrders);
-    };
-
-    loadWaiterOrders();
-
-    const interval = setInterval(
-      loadWaiterOrders,
-      1000
-    );
-
-    return () => clearInterval(interval);
-  }, []);
-
-  const updateWaiterStatus = (orderId: number) => {
-    const currentOrder = orders.find(
-      (order) => order.id === orderId
-    );
-
-    if (!currentOrder) return;
-
-    const shouldRemove =
-      currentOrder.waiterStatus === "served";
-
-    const savedOrders = JSON.parse(
-      localStorage.getItem("dinevo-orders") || "[]"
-    );
-
-    const updatedOrders = savedOrders.map((order: any) => {
-      if (order.id !== orderId) {
-        return order;
-      }
-
-      if (shouldRemove) {
-        return {
-          ...order,
-          waiterRemoved: true,
-        };
-      }
-
-      return {
-        ...order,
-        waiterStatus: "served",
-      };
-    });
-
-    localStorage.setItem(
-      "dinevo-orders",
-      JSON.stringify(updatedOrders)
-    );
-
-    if (shouldRemove) {
-      setOrders((current) =>
-        current.filter(
-          (order) => order.id !== orderId
-        )
-      );
-    } else {
-      setOrders((current) =>
-        current.map((order) =>
-          order.id === orderId
-            ? {
-                ...order,
-                waiterStatus: "served",
-              }
-            : order
-        )
-      );
-    }
+    setOrders(waiterOrders);
   };
+
+  // Load immediately
+  loadWaiterOrders();
+const refreshInterval = setInterval(() => {
+  loadWaiterOrders();
+}, 3000);
+  // Listen for Kitchen status changes
+  const waiterChannel = supabase
+    .channel("dinevo-waiter-orders")
+
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "orders",
+      },
+      () => {
+        loadWaiterOrders();
+      }
+    )
+
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "order_guests",
+      },
+      () => {
+        loadWaiterOrders();
+      }
+    )
+
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "order_items",
+      },
+      () => {
+        loadWaiterOrders();
+      }
+    )
+
+    .subscribe();
+
+  return () => {
+  clearInterval(refreshInterval);
+  supabase.removeChannel(waiterChannel);
+};
+}, []);
+
+  const updateWaiterStatus = async (orderId: number) => {
+  if (servingOrderId === orderId) return;
+
+  setServingOrderId(orderId);
+  const currentOrder = orders.find(
+    (order) => order.id === orderId
+  );
+
+  if (!currentOrder) return;
+
+  // Update Supabase
+  const { error } = await supabase
+    .from("orders")
+    .update({
+      waiter_status: "served",
+      served_at: new Date().toISOString(),
+    })
+    .eq("id", orderId);
+
+  if (error) {
+    console.error(
+      "Waiter status update error:",
+      error
+    );
+
+    alert("Could not update waiter order");
+     setServingOrderId(null);
+    return;
+  }
+
+  
+
+  // Remove immediately from Waiter screen
+  setOrders((current) =>
+    current.filter(
+      (order) =>
+        String(order.id) !== String(orderId)
+    )
+  );
+};
 
 const printWaiterOrder = (order: WaiterOrder) => {
   const printWindow = window.open(
@@ -295,6 +356,7 @@ const printWaiterOrder = (order: WaiterOrder) => {
 };
 
   return (
+    <StaffGuard>
     <main className="min-h-screen bg-[#0d0f10] text-white">
       <header className="border-b border-white/10 px-6 py-5">
         <div className="flex items-center gap-5">
@@ -344,19 +406,20 @@ const printWaiterOrder = (order: WaiterOrder) => {
                 </div>
 
                 <button
-                  onClick={() =>
-                    updateWaiterStatus(order.id)
-                  }
-                  className={`mt-4 w-full rounded-xl py-3 font-black transition ${
-                    order.waiterStatus === "served"
-                      ? "bg-blue-600 text-white hover:bg-blue-700"
-                      : "bg-green-600 text-white hover:bg-green-700"
-                  }`}
-                >
-                  {order.waiterStatus === "served"
-                    ? "SERVED"
-                    : "PREPARING"}
-                </button>
+  onClick={() =>
+    updateWaiterStatus(order.id)
+  }
+  disabled={servingOrderId === order.id}
+  className={`mt-4 w-full rounded-xl py-3 font-black transition ${
+    servingOrderId === order.id
+      ? "cursor-not-allowed bg-gray-700 text-gray-400"
+      : "bg-green-600 text-white hover:bg-green-700"
+  }`}
+>
+  {servingOrderId === order.id
+    ? "MARKING SERVED..."
+    : "READY TO SERVE"}
+</button>
 
                 <div className="mt-5 space-y-5">
                   {order.guests.map(
@@ -405,5 +468,6 @@ const printWaiterOrder = (order: WaiterOrder) => {
         )}
       </section>
     </main>
+    </StaffGuard>
   );
 }

@@ -1,7 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 const languages = [
   { code: "en", label: "English", flag: "🇬🇧" },
@@ -16,6 +17,31 @@ export default function StartPage() {
   const router = useRouter();
 
   const [selectedLanguage, setSelectedLanguage] = useState("");
+  const [restaurantName, setRestaurantName] =
+  useState("Dinevo Restaurant");
+useEffect(() => {
+  const loadRestaurantSettings = async () => {
+    const { data, error } = await supabase
+      .from("restaurant_settings")
+      .select("restaurant_name")
+      .eq("id", 1)
+      .single();
+
+    if (error) {
+      console.error(
+        "Restaurant name load error:",
+        error
+      );
+      return;
+    }
+
+    if (data?.restaurant_name) {
+      setRestaurantName(data.restaurant_name);
+    }
+  };
+
+  loadRestaurantSettings();
+}, []);
 
   const continueToMenu = () => {
     if (!selectedLanguage) return;
@@ -48,8 +74,12 @@ export default function StartPage() {
           {/* WELCOME */}
 
           <h1 className="text-5xl font-bold tracking-tight">
-            Welcome
-          </h1>
+  Welcome
+</h1>
+
+<p className="mt-3 text-2xl font-bold text-red-500">
+  {restaurantName}
+</p>
 
           <p className="mx-auto mt-4 max-w-md text-lg leading-7 text-gray-400">
             We're delighted to have you with us.
@@ -74,9 +104,16 @@ export default function StartPage() {
             <select
               id="language"
               value={selectedLanguage}
-              onChange={(e) =>
-                setSelectedLanguage(e.target.value)
-              }
+              onChange={(e) => {
+  const language = e.target.value;
+
+  setSelectedLanguage(language);
+
+  localStorage.setItem(
+    "dinevo-language",
+    language
+  );
+}}
               className="w-full cursor-pointer rounded-2xl border border-white/10 bg-[#1f1f1f] px-5 py-4 text-lg text-white outline-none transition focus:border-red-500"
             >
 

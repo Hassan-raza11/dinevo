@@ -1,51 +1,287 @@
 "use client";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-
+import { supabase } from "@/lib/supabase";
 
 type OrderData = {
+  id?: number;
   orderId?: number;
   tableNumber?: string;
   serviceType?: string;
   total?: number;
-  createdAt?: string;
+  createdAt?: number | string;
+};
+
+const translations = {
+  en: {
+    orderConfirmed: "Order Confirmed",
+    thankYou: "Thank You So Much!",
+    message:
+      "Your order has been successfully sent to our kitchen. Our team is now preparing your meal.",
+
+    order: "Order",
+    table: "Table",
+    service: "Service",
+    takeaway: "Take Away",
+    dineIn: "Dine In",
+
+    preparationTime: "Estimated Preparation Time",
+    min: "min",
+    preparationMessage:
+      "Please relax and enjoy your time while our kitchen prepares your order.",
+
+    paymentTitle: "Payment After Your Meal",
+    paymentBefore: "After enjoying your meal, please approach the",
+    cashCounter: "cash counter",
+    paymentAfter: "to complete your payment.",
+
+    orderTotal: "Order Total",
+    poweredBy: "Powered by DINEVO",
+    tagline: "From Table to Kitchen, Seamlessly.",
+  },
+
+  fr: {
+    orderConfirmed: "Commande confirmée",
+    thankYou: "Merci beaucoup !",
+    message:
+      "Votre commande a été envoyée avec succès à notre cuisine. Notre équipe prépare maintenant votre repas.",
+
+    order: "Commande",
+    table: "Table",
+    service: "Service",
+    takeaway: "À emporter",
+    dineIn: "Sur place",
+
+    preparationTime: "Temps de préparation estimé",
+    min: "min",
+    preparationMessage:
+      "Détendez-vous et profitez de votre temps pendant que notre cuisine prépare votre commande.",
+
+    paymentTitle: "Paiement après votre repas",
+    paymentBefore:
+      "Après avoir profité de votre repas, veuillez vous rendre à la",
+    cashCounter: "caisse",
+    paymentAfter: "pour effectuer votre paiement.",
+
+    orderTotal: "Total de la commande",
+    poweredBy: "Propulsé par DINEVO",
+    tagline: "De la table à la cuisine, en toute simplicité.",
+  },
+
+  es: {
+    orderConfirmed: "Pedido confirmado",
+    thankYou: "¡Muchas gracias!",
+    message:
+      "Su pedido ha sido enviado correctamente a nuestra cocina. Nuestro equipo está preparando su comida.",
+
+    order: "Pedido",
+    table: "Mesa",
+    service: "Servicio",
+    takeaway: "Para llevar",
+    dineIn: "Comer aquí",
+
+    preparationTime: "Tiempo estimado de preparación",
+    min: "min",
+    preparationMessage:
+      "Relájese y disfrute mientras nuestra cocina prepara su pedido.",
+
+    paymentTitle: "Pago después de su comida",
+    paymentBefore:
+      "Después de disfrutar de su comida, diríjase a la",
+    cashCounter: "caja",
+    paymentAfter: "para completar el pago.",
+
+    orderTotal: "Total del pedido",
+    poweredBy: "Desarrollado por DINEVO",
+    tagline: "De la mesa a la cocina, sin complicaciones.",
+  },
+
+  de: {
+    orderConfirmed: "Bestellung bestätigt",
+    thankYou: "Vielen Dank!",
+    message:
+      "Ihre Bestellung wurde erfolgreich an unsere Küche gesendet. Unser Team bereitet Ihre Mahlzeit jetzt vor.",
+
+    order: "Bestellung",
+    table: "Tisch",
+    service: "Service",
+    takeaway: "Zum Mitnehmen",
+    dineIn: "Vor Ort",
+
+    preparationTime: "Geschätzte Zubereitungszeit",
+    min: "Min.",
+    preparationMessage:
+      "Entspannen Sie sich, während unsere Küche Ihre Bestellung vorbereitet.",
+
+    paymentTitle: "Bezahlung nach dem Essen",
+    paymentBefore:
+      "Nach Ihrem Essen gehen Sie bitte zur",
+    cashCounter: "Kasse",
+    paymentAfter: "um Ihre Zahlung abzuschließen.",
+
+    orderTotal: "Bestellsumme",
+    poweredBy: "Bereitgestellt von DINEVO",
+    tagline: "Vom Tisch zur Küche, nahtlos.",
+  },
+
+  it: {
+    orderConfirmed: "Ordine confermato",
+    thankYou: "Grazie mille!",
+    message:
+      "Il tuo ordine è stato inviato con successo alla nostra cucina. Il nostro team sta preparando il tuo pasto.",
+
+    order: "Ordine",
+    table: "Tavolo",
+    service: "Servizio",
+    takeaway: "Da asporto",
+    dineIn: "Mangia qui",
+
+    preparationTime: "Tempo di preparazione stimato",
+    min: "min",
+    preparationMessage:
+      "Rilassati e goditi il momento mentre la nostra cucina prepara il tuo ordine.",
+
+    paymentTitle: "Pagamento dopo il pasto",
+    paymentBefore:
+      "Dopo aver gustato il pasto, recati alla",
+    cashCounter: "cassa",
+    paymentAfter: "per completare il pagamento.",
+
+    orderTotal: "Totale ordine",
+    poweredBy: "Powered by DINEVO",
+    tagline: "Dal tavolo alla cucina, senza interruzioni.",
+  },
+
+  ar: {
+    orderConfirmed: "تم تأكيد الطلب",
+    thankYou: "شكراً جزيلاً!",
+    message:
+      "تم إرسال طلبك بنجاح إلى المطبخ. يقوم فريقنا الآن بتحضير وجبتك.",
+
+    order: "الطلب",
+    table: "الطاولة",
+    service: "الخدمة",
+    takeaway: "طلب سفري",
+    dineIn: "تناول الطعام هنا",
+
+    preparationTime: "الوقت المتوقع للتحضير",
+    min: "دقيقة",
+    preparationMessage:
+      "استرخِ واستمتع بوقتك بينما يقوم المطبخ بتحضير طلبك.",
+
+    paymentTitle: "الدفع بعد تناول الوجبة",
+    paymentBefore:
+      "بعد الانتهاء من وجبتك، يرجى التوجه إلى",
+    cashCounter: "صندوق الدفع",
+    paymentAfter: "لإتمام عملية الدفع.",
+
+    orderTotal: "إجمالي الطلب",
+    poweredBy: "بدعم من DINEVO",
+    tagline: "من الطاولة إلى المطبخ بكل سلاسة.",
+  },
 };
 
 export default function ThankYouPage() {
-    const router = useRouter();
-  const [order, setOrder] = useState<OrderData | null>(null);
+  const router = useRouter();
+
+  const [order, setOrder] =
+    useState<OrderData | null>(null);
+
+  const [language, setLanguage] =
+    useState("en");
+const [preparationTime, setPreparationTime] =
+  useState(15);
+
+const [currencySymbol, setCurrencySymbol] =
+  useState("€");
 
   useEffect(() => {
-  const savedOrder = localStorage.getItem(
-    "dinevo-confirmed-order"
-  );
+    const savedOrder = localStorage.getItem(
+      "dinevo-confirmed-order"
+    );
 
-  if (savedOrder) {
-    setOrder(JSON.parse(savedOrder));
-  }
+    const savedLanguage =
+      localStorage.getItem("dinevo-language") || "en";
 
-  const timer = setTimeout(() => {
-    // Clear previous customer session
-    localStorage.removeItem("dinevo-table-number");
-    localStorage.removeItem("dinevo-service-type");
-    localStorage.removeItem("dinevo-language");
-    localStorage.removeItem("dinevo-confirmed-order");
+    setLanguage(savedLanguage);
 
-    // Return tablet to welcome screen
-    router.push("/start");
-  }, 10000);
+    if (savedOrder) {
+      setOrder(JSON.parse(savedOrder));
+    }
 
-  return () => clearTimeout(timer);
-}, [router]);
+    const timer = setTimeout(() => {
+      // Clear previous customer session
+      localStorage.removeItem(
+        "dinevo-table-number"
+      );
+
+      localStorage.removeItem(
+        "dinevo-service-type"
+      );
+
+      localStorage.removeItem(
+        "dinevo-language"
+      );
+
+      localStorage.removeItem(
+        "dinevo-confirmed-order"
+      );
+
+      // Return tablet to welcome screen
+      router.push("/start");
+    }, 10000);
+
+    return () => clearTimeout(timer);
+  }, [router]);
+useEffect(() => {
+  const loadPreparationTime = async () => {
+    const { data, error } = await supabase
+      .from("restaurant_settings")
+.select("preparation_time, currency_symbol")
+.eq("id", 1)
+.single();
+
+    if (error) {
+      console.error(
+        "Preparation time load error:",
+        error
+      );
+      return;
+    }
+
+    if (data?.preparation_time) {
+      setPreparationTime(
+        Number(data.preparation_time)
+      );
+    }
+    if (data?.currency_symbol) {
+  setCurrencySymbol(data.currency_symbol);
+}
+  };
+
+  loadPreparationTime();
+}, []);
+
+
+  const text =
+    translations[
+      language as keyof typeof translations
+    ] || translations.en;
+
+  const orderId =
+    order?.id || order?.orderId;
 
   const orderNumber =
-    order?.orderId
-      ? String(order.orderId).slice(-5)
+    orderId
+      ? String(orderId).slice(-5)
       : "-----";
 
   return (
-    <main className="min-h-screen bg-[#111214] text-white">
-
+    <main
+      className="min-h-screen bg-[#111214] text-white"
+      dir={language === "ar" ? "rtl" : "ltr"}
+    >
       <div className="flex min-h-screen items-center justify-center px-6 py-10">
 
         <div className="w-full max-w-2xl text-center">
@@ -72,16 +308,15 @@ export default function ThankYouPage() {
           {/* MESSAGE */}
 
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-red-500">
-            Order Confirmed
+            {text.orderConfirmed}
           </p>
 
           <h1 className="mt-3 text-4xl font-black sm:text-5xl">
-            Thank You So Much!
+            {text.thankYou}
           </h1>
 
           <p className="mx-auto mt-5 max-w-xl text-lg leading-8 text-gray-400">
-            Your order has been successfully sent to our kitchen.
-            Our team is now preparing your meal.
+            {text.message}
           </p>
 
           {/* ORDER INFORMATION */}
@@ -93,7 +328,7 @@ export default function ThankYouPage() {
             <div className="rounded-2xl border border-white/10 bg-[#1d1e20] p-5">
 
               <p className="text-xs font-bold uppercase tracking-wider text-gray-500">
-                Order
+                {text.order}
               </p>
 
               <p className="mt-2 text-xl font-black">
@@ -107,12 +342,12 @@ export default function ThankYouPage() {
             <div className="rounded-2xl border border-white/10 bg-[#1d1e20] p-5">
 
               <p className="text-xs font-bold uppercase tracking-wider text-gray-500">
-                Table
+                {text.table}
               </p>
 
               <p className="mt-2 text-xl font-black">
                 {order?.tableNumber
-                  ? `Table ${order.tableNumber}`
+                  ? `${text.table} ${order.tableNumber}`
                   : "—"}
               </p>
 
@@ -123,13 +358,13 @@ export default function ThankYouPage() {
             <div className="rounded-2xl border border-white/10 bg-[#1d1e20] p-5">
 
               <p className="text-xs font-bold uppercase tracking-wider text-gray-500">
-                Service
+                {text.service}
               </p>
 
               <p className="mt-2 text-xl font-black">
                 {order?.serviceType === "takeaway"
-                  ? "Take Away"
-                  : "Dine In"}
+                  ? text.takeaway
+                  : text.dineIn}
               </p>
 
             </div>
@@ -141,19 +376,18 @@ export default function ThankYouPage() {
           <section className="mt-8 rounded-3xl border border-red-500/20 bg-red-500/10 p-8">
 
             <p className="text-sm font-bold uppercase tracking-[0.18em] text-red-400">
-              Estimated Preparation Time
+              {text.preparationTime}
             </p>
 
             <p className="mt-3 text-5xl font-black">
-              15
+              {preparationTime}
               <span className="ml-2 text-2xl text-gray-400">
-                min
+                {text.min}
               </span>
             </p>
 
             <p className="mx-auto mt-4 max-w-md leading-7 text-gray-400">
-              Please relax and enjoy your time while our kitchen
-              prepares your order.
+              {text.preparationMessage}
             </p>
 
           </section>
@@ -167,15 +401,17 @@ export default function ThankYouPage() {
             </div>
 
             <h2 className="text-xl font-bold">
-              Payment After Your Meal
+              {text.paymentTitle}
             </h2>
 
             <p className="mx-auto mt-3 max-w-lg leading-7 text-gray-400">
-              After enjoying your meal, please approach the
+              {text.paymentBefore}{" "}
+
               <span className="font-bold text-white">
-                {" "}cash counter{" "}
+                {text.cashCounter}
               </span>
-              to complete your payment.
+
+              {" "}{text.paymentAfter}
             </p>
 
             {order?.total !== undefined && (
@@ -183,11 +419,11 @@ export default function ThankYouPage() {
               <div className="mx-auto mt-5 flex max-w-sm items-center justify-between rounded-xl bg-black/30 px-5 py-4">
 
                 <span className="text-sm text-gray-400">
-                  Order Total
+                  {text.orderTotal}
                 </span>
 
                 <strong className="text-xl text-red-500">
-                  €{order.total.toFixed(2)}
+                 {currencySymbol}{order.total.toFixed(2)}
                 </strong>
 
               </div>
@@ -201,11 +437,11 @@ export default function ThankYouPage() {
           <footer className="mt-10">
 
             <p className="text-xs font-bold uppercase tracking-[0.25em] text-gray-600">
-              Powered by DINEVO
+              {text.poweredBy}
             </p>
 
             <p className="mt-2 text-xs text-gray-700">
-              From Table to Kitchen, Seamlessly.
+              {text.tagline}
             </p>
 
           </footer>
@@ -213,7 +449,6 @@ export default function ThankYouPage() {
         </div>
 
       </div>
-
     </main>
   );
 }
