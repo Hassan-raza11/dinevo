@@ -29,10 +29,13 @@ export default function StaffLoginPage() {
     });
 
     if (error) {
-      setErrorMessage("Invalid email or password.");
-      setLoading(false);
-      return;
-    }
+  console.error("Staff login error:", error);
+
+  setErrorMessage(error.message);
+
+  setLoading(false);
+  return;
+}
 
     router.push("/admin");
   };
