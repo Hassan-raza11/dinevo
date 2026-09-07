@@ -844,14 +844,13 @@ try {
     "Order successfully saved to Supabase:",
     supabaseOrder.id
   );
-} catch (error) {
-  console.error(
-    "Supabase order save failed:",
-    error
-  );
+} catch (error: any) {
+  console.error("Supabase order save failed:", error);
 
   alert(
-    "Could not confirm your order. Please try again."
+    `ORDER ERROR:
+
+${error?.message || JSON.stringify(error)}`
   );
 
   setIsConfirmingOrder(false);
