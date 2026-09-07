@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
 
 export default function StaffGuard({
   children,
@@ -10,28 +9,21 @@ export default function StaffGuard({
   children: React.ReactNode;
 }) {
   const router = useRouter();
+
   const [allowed, setAllowed] = useState(false);
 
   useEffect(() => {
-    const checkSession = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+    const access =
+      localStorage.getItem("dinevo-staff-access");
 
-      if (!session) {
-        router.replace("/staff-login");
-        return;
-      }
+    if (access !== "true") {
+      router.replace("/staff-login");
+      return;
+    }
 
-      setAllowed(true);
-    };
-
-    checkSession();
+    setAllowed(true);
   }, [router]);
-const logout = async () => {
-  await supabase.auth.signOut();
-  router.replace("/staff-login");
-};
+
   if (!allowed) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-black text-white">
