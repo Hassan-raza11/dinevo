@@ -169,9 +169,7 @@ if (settingsError) {
   }, 1000);
 
 // Backup refresh every 3 seconds
-const refreshInterval = setInterval(() => {
-  loadKitchenOrders();
-}, 3000);
+
 
   // Realtime listener
   const kitchenChannel = supabase
@@ -217,7 +215,6 @@ const refreshInterval = setInterval(() => {
 
   return () => {
   clearInterval(timerInterval);
-  clearInterval(refreshInterval);
   supabase.removeChannel(kitchenChannel);
 };
 }, []);
