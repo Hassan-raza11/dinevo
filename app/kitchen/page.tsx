@@ -243,8 +243,37 @@ const refreshInterval = setInterval(() => {
 
   if (!item) return;
 
+  // Normal mode = mark completed
+  // Undo mode = mark not completed
   const newDoneValue = undoMode ? false : true;
 
+  // 1. CHANGE SCREEN IMMEDIATELY
+  setOrders((currentOrders) =>
+    currentOrders.map((order) => {
+      if (order.id !== orderId) return order;
+
+      return {
+        ...order,
+        guests: order.guests.map((guest, index) => {
+          if (index !== guestIndex) return guest;
+
+          return {
+            ...guest,
+            items: guest.items.map((dish) =>
+              dish.id === itemId
+                ? {
+                    ...dish,
+                    done: newDoneValue,
+                  }
+                : dish
+            ),
+          };
+        }),
+      };
+    })
+  );
+
+  // 2. SAVE TO SUPABASE
   const { error } = await supabase
     .from("order_items")
     .update({
@@ -252,51 +281,40 @@ const refreshInterval = setInterval(() => {
     })
     .eq("id", itemId);
 
-if (error) {
-  console.error(
-    "Kitchen item update error:",
-    error
-  );
+  if (error) {
+    console.error(
+      "Kitchen item update error:",
+      error
+    );
 
-  alert(
-    "Could not update dish status. Please try again."
-  );
+    // Put it back if database update fails
+    setOrders((currentOrders) =>
+      currentOrders.map((order) => {
+        if (order.id !== orderId) return order;
 
-  return;
-}
-
-  setOrders((currentOrders) =>
-    currentOrders.map((order) => {
-      if (order.id !== orderId) {
-        return order;
-      }
-
-      return {
-        ...order,
-
-        guests: order.guests.map(
-          (guest, index) => {
-            if (index !== guestIndex) {
-              return guest;
-            }
+        return {
+          ...order,
+          guests: order.guests.map((guest, index) => {
+            if (index !== guestIndex) return guest;
 
             return {
               ...guest,
-
-              items: guest.items.map((item) =>
-                item.id === itemId
+              items: guest.items.map((dish) =>
+                dish.id === itemId
                   ? {
-                      ...item,
-                      done: newDoneValue,
+                      ...dish,
+                      done: item.done,
                     }
-                  : item
+                  : dish
               ),
             };
-          }
-        ),
-      };
-    })
-  );
+          }),
+        };
+      })
+    );
+
+    alert("Could not update dish status.");
+  }
 };
 const completeOrder = async (orderId: number) => {
   if (completingOrderId === orderId) return;
