@@ -1728,7 +1728,7 @@ function GuestOrderView({
                 </h3>
 
                 <p className="text-sm text-gray-500">
-                  {settings.currencySymbol}{item.price.toFixed(2)}
+                  {currencySymbol}{item.price.toFixed(2)}
                 </p>
 
               </div>
