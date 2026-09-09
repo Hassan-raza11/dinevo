@@ -127,7 +127,83 @@ const [showMenuManagement, setShowMenuManagement] =
 
   const [showSettings, setShowSettings] = useState(false);
 
-  // LOAD ORDERS + SETTINGS
+  // LOAD RESTAURANT SETTINGS FROM SUPABASE
+  useEffect(() => {
+    const loadSettings = async () => {
+      const { data, error } = await supabase
+        .from("restaurant_settings")
+        .select(`
+          id,
+          restaurant_name,
+          tax_rate,
+          preparation_time,
+          currency,
+          currency_symbol
+        `)
+        .eq("id", 1)
+        .single();
+
+      if (error) {
+        console.error("Admin settings load error:", error);
+        return;
+      }
+
+      if (!data) return;
+
+      const loadedSettings: RestaurantSettings = {
+        restaurantName:
+          data.restaurant_name || defaultSettings.restaurantName,
+        taxRate:
+          Number(data.tax_rate) || defaultSettings.taxRate,
+        preparationTime:
+          Number(data.preparation_time) ||
+          defaultSettings.preparationTime,
+        currency:
+          data.currency || defaultSettings.currency,
+        currencySymbol:
+          data.currency_symbol || defaultSettings.currencySymbol,
+      };
+
+      // Keep the live saved settings synchronized,
+      // but DO NOT overwrite draftSettings here.
+      // draftSettings is the form the manager is currently typing into.
+      setSettings(loadedSettings);
+
+      localStorage.setItem(
+        "dinevo-settings",
+        JSON.stringify(loadedSettings)
+      );
+    };
+
+    loadSettings();
+
+    // Backup polling keeps Admin synchronized even if Realtime is disabled.
+    const settingsInterval = setInterval(() => {
+      loadSettings();
+    }, 5000);
+
+    const settingsChannel = supabase
+      .channel("dinevo-admin-settings-live")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "restaurant_settings",
+        },
+        () => {
+          loadSettings();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      clearInterval(settingsInterval);
+      supabase.removeChannel(settingsChannel);
+    };
+  }, []);
+
+  // LOAD ORDERS
   useEffect(() => {
   const loadOrders = async () => {
     const { data, error } = await supabase
@@ -655,34 +731,62 @@ const selectedDayReport = useMemo(() => {
       return;
     }
 
+    const { data, error } = await supabase
+      .from("restaurant_settings")
+      .update({
+        restaurant_name: draftSettings.restaurantName.trim(),
+        tax_rate: draftSettings.taxRate,
+        preparation_time: draftSettings.preparationTime,
+        currency: draftSettings.currency,
+        currency_symbol: draftSettings.currencySymbol,
+      })
+      .eq("id", 1)
+      .select(`
+        id,
+        restaurant_name,
+        tax_rate,
+        preparation_time,
+        currency,
+        currency_symbol
+      `)
+      .single();
+
+    if (error || !data) {
+      console.error(
+        "Supabase settings save error:",
+        error || "No settings row was updated."
+      );
+
+      alert(
+        "Restaurant settings were NOT saved to Supabase. Please check the restaurant_settings UPDATE policy in Supabase."
+      );
+      return;
+    }
+
+    const savedSettings: RestaurantSettings = {
+      restaurantName:
+        data.restaurant_name || defaultSettings.restaurantName,
+      taxRate:
+        Number(data.tax_rate) || defaultSettings.taxRate,
+      preparationTime:
+        Number(data.preparation_time) ||
+        defaultSettings.preparationTime,
+      currency:
+        data.currency || defaultSettings.currency,
+      currencySymbol:
+        data.currency_symbol || defaultSettings.currencySymbol,
+    };
+
     localStorage.setItem(
       "dinevo-settings",
-      JSON.stringify(draftSettings)
+      JSON.stringify(savedSettings)
     );
 
-const { error } = await supabase
-  .from("restaurant_settings")
-  .update({
-    restaurant_name: draftSettings.restaurantName,
-    tax_rate: draftSettings.taxRate,
-    preparation_time: draftSettings.preparationTime,
-    currency: draftSettings.currency,
-    currency_symbol: draftSettings.currencySymbol,
-  })
-  .eq("id", 1);
-
-if (error) {
-  console.error(
-    "Supabase settings save error:",
-    error
-  );
-
-  alert("Could not save restaurant settings.");
-  return;
-}
-
-    setSettings(draftSettings);
+    setSettings(savedSettings);
+    setDraftSettings(savedSettings);
     setShowSettings(false);
+
+    alert("Restaurant settings saved successfully.");
   };
 
 const addDish = async () => {
@@ -767,6 +871,54 @@ const addDish = async () => {
   setShowAddDish(false);
 
   alert("Dish added successfully.");
+};
+
+const toggleDishAvailability = async (
+  item: MenuAdminItem
+) => {
+  const nextActive = !item.active;
+
+  const { data, error } = await supabase
+    .from("menu_items")
+    .update({
+      active: nextActive,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", item.id)
+    .select("id, active");
+
+  if (error) {
+    console.error("Dish availability update error:", error);
+    alert("Could not change dish availability in Supabase.");
+    return;
+  }
+
+  const savedRow = data?.[0];
+
+  if (
+    !savedRow ||
+    Number(savedRow.id) !== Number(item.id) ||
+    Boolean(savedRow.active) !== nextActive
+  ) {
+    console.error("Dish availability was not persisted:", {
+      itemId: item.id,
+      requested: nextActive,
+      returned: data,
+    });
+
+    alert(
+      "Supabase did not save the Sold Out status. The menu item was not changed."
+    );
+    return;
+  }
+
+  setMenuItems((current) =>
+    current.map((dish) =>
+      dish.id === item.id
+        ? { ...dish, active: Boolean(savedRow.active) }
+        : dish
+    )
+  );
 };
 
 const saveEditedDish = async () => {
@@ -1763,20 +1915,33 @@ const saveEditedDish = async () => {
     className={`mt-1 font-bold ${
       item.active
         ? "text-green-400"
-        : "text-gray-500"
+        : "text-red-400"
     }`}
   >
     {item.active
-      ? "Active"
-      : "Inactive"}
+      ? "Available"
+      : "SOLD OUT"}
   </p>
 
-  <button
-    onClick={() => setEditingDish(item)}
-    className="mt-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-black text-white hover:bg-white/10"
-  >
-    Edit
-  </button>
+  <div className="mt-3 flex justify-end gap-2">
+    <button
+      onClick={() => toggleDishAvailability(item)}
+      className={`rounded-lg border px-3 py-2 text-xs font-black transition ${
+        item.active
+          ? "border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-600 hover:text-white"
+          : "border-green-500/30 bg-green-500/10 text-green-400 hover:bg-green-600 hover:text-white"
+      }`}
+    >
+      {item.active ? "Mark Sold Out" : "Make Available"}
+    </button>
+
+    <button
+      onClick={() => setEditingDish(item)}
+      className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-black text-white hover:bg-white/10"
+    >
+      Edit
+    </button>
+  </div>
 </div>
 
                   </div>

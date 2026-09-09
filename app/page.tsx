@@ -13,10 +13,27 @@ type MenuItem = {
   image: string;
   vegetarian?: boolean;
   station?: "kitchen" | "pizza" | "bar";
+  active?: boolean;
 };
 
 type CartItem = MenuItem & {
   quantity: number;
+};
+
+type RestaurantSettings = {
+  restaurantName: string;
+  taxRate: number;
+  preparationTime: number;
+  currency: string;
+  currencySymbol: string;
+};
+
+const defaultSettings: RestaurantSettings = {
+  restaurantName: "Dinevo Restaurant",
+  taxRate: 10,
+  preparationTime: 15,
+  currency: "EUR",
+  currencySymbol: "€",
 };
 
 const fallbackCategories = [
@@ -445,6 +462,9 @@ const translations = {
 export default function Home() {
   const router = useRouter();
 
+  const [settings, setSettings] =
+    useState<RestaurantSettings>(defaultSettings);
+
   const [tableNumber, setTableNumber] = useState("");
   const [serviceType, setServiceType] = useState("");
   const [language, setLanguage] = useState("en");
@@ -481,6 +501,83 @@ const text =
     useState<MenuItem | null>(null);
 const [isConfirmingOrder, setIsConfirmingOrder] =
   useState(false);
+
+  useEffect(() => {
+    const loadSettings = async () => {
+      const { data, error } = await supabase
+        .from("restaurant_settings")
+        .select(`
+          id,
+          restaurant_name,
+          tax_rate,
+          preparation_time,
+          currency,
+          currency_symbol
+        `)
+        .eq("id", 1)
+        .single();
+
+      if (error) {
+        console.error(
+          "Customer settings load error:",
+          error
+        );
+        return;
+      }
+
+      if (!data) return;
+
+      const loadedSettings: RestaurantSettings = {
+        restaurantName:
+          data.restaurant_name || defaultSettings.restaurantName,
+        taxRate:
+          Number(data.tax_rate) || defaultSettings.taxRate,
+        preparationTime:
+          Number(data.preparation_time) ||
+          defaultSettings.preparationTime,
+        currency:
+          data.currency || defaultSettings.currency,
+        currencySymbol:
+          data.currency_symbol || defaultSettings.currencySymbol,
+      };
+
+      setSettings(loadedSettings);
+
+      // Keep a local copy only as a cache.
+      localStorage.setItem(
+        "dinevo-settings",
+        JSON.stringify(loadedSettings)
+      );
+    };
+
+    loadSettings();
+
+    // Polling is the safety net if Supabase Realtime is not enabled.
+    const settingsInterval = setInterval(() => {
+      loadSettings();
+    }, 3000);
+
+    const settingsChannel = supabase
+      .channel("dinevo-customer-settings-live")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "restaurant_settings",
+        },
+        () => {
+          loadSettings();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      clearInterval(settingsInterval);
+      supabase.removeChannel(settingsChannel);
+    };
+  }, []);
+
   useEffect(() => {
     const savedTable =
       localStorage.getItem("dinevo-table-number");
@@ -540,7 +637,6 @@ const [isConfirmingOrder, setIsConfirmingOrder] =
             name
           )
         `)
-        .eq("active", true)
         .order("display_order", { ascending: true });
 
       if (itemError) {
@@ -584,10 +680,31 @@ const [isConfirmingOrder, setIsConfirmingOrder] =
               item.station === "bar"
                 ? item.station
                 : "kitchen",
+            active: Boolean(item.active),
           };
         });
 
       setMenuItems(mappedMenu);
+
+      const availableIds = new Set(
+        mappedMenu
+          .filter((item) => item.active !== false)
+          .map((item) => item.id)
+      );
+
+      setOrders((current) => {
+        const cleaned: Record<number, CartItem[]> = {};
+
+        Object.entries(current).forEach(
+          ([personIndex, items]) => {
+            cleaned[Number(personIndex)] = items.filter(
+              (cartItem) => availableIds.has(cartItem.id)
+            );
+          }
+        );
+
+        return cleaned;
+      });
     };
 
     loadMenuFromSupabase();
@@ -620,48 +737,82 @@ return () => {
     setShowGuestInput(false);
   };
 
-  const addItem = (item: MenuItem) => {
+  const addItem = async (item: MenuItem) => {
     if (selectedPerson === null) return;
 
-    const currentOrder =
-      orders[selectedPerson] || [];
+    const { data: liveItem, error } = await supabase
+      .from("menu_items")
+      .select("id, active")
+      .eq("id", item.id)
+      .single();
 
-    const existingItem =
-      currentOrder.find(
-        (cartItem) => cartItem.id === item.id
-      );
-
-    let updatedOrder: CartItem[];
-
-    if (existingItem) {
-      updatedOrder = currentOrder.map((cartItem) =>
-        cartItem.id === item.id
-          ? {
-              ...cartItem,
-              quantity: cartItem.quantity + 1,
-            }
-          : cartItem
-      );
-    } else {
-      updatedOrder = [
-        ...currentOrder,
-        {
-          ...item,
-          quantity: 1,
-        },
-      ];
+    if (error) {
+      console.error("Live availability check error:", error);
+      alert("Could not verify this dish. Please try again.");
+      return;
     }
 
-    setOrders((current) => ({
-      ...current,
-      [selectedPerson]: updatedOrder,
-    }));
+    if (!liveItem || liveItem.active !== true) {
+      alert(`${item.name} is sold out and cannot be added.`);
+
+      setMenuItems((current) =>
+        current.map((dish) =>
+          dish.id === item.id
+            ? { ...dish, active: false }
+            : dish
+        )
+      );
+
+      return;
+    }
+
+    setOrders((currentOrders) => {
+      const currentOrder =
+        currentOrders[selectedPerson] || [];
+
+      const existingItem =
+        currentOrder.find(
+          (cartItem) => cartItem.id === item.id
+        );
+
+      const updatedOrder = existingItem
+        ? currentOrder.map((cartItem) =>
+            cartItem.id === item.id
+              ? {
+                  ...cartItem,
+                  quantity: cartItem.quantity + 1,
+                }
+              : cartItem
+          )
+        : [
+            ...currentOrder,
+            {
+              ...item,
+              active: true,
+              quantity: 1,
+            },
+          ];
+
+      return {
+        ...currentOrders,
+        [selectedPerson]: updatedOrder,
+      };
+    });
   };
 
   const increaseQuantity = (
     personIndex: number,
     itemId: number
   ) => {
+    const liveItem = menuItems.find(
+      (item) => item.id === itemId
+    );
+
+    if (!liveItem || liveItem.active === false) {
+      alert("This item is sold out and cannot be added.");
+      return;
+    }
+
     const currentOrder =
       orders[personIndex] || [];
 
@@ -747,6 +898,68 @@ return () => {
   if (tableTotal === 0) return;
 
   setIsConfirmingOrder(true);
+
+  const orderedItemIds = Array.from(
+    new Set(
+      Object.values(orders)
+        .flat()
+        .map((item) => item.id)
+    )
+  );
+
+  if (orderedItemIds.length > 0) {
+    const { data: liveItems, error: availabilityError } =
+      await supabase
+        .from("menu_items")
+        .select("id, active")
+        .in("id", orderedItemIds);
+
+    if (availabilityError) {
+      console.error(
+        "Availability check error:",
+        availabilityError
+      );
+      alert("Could not verify item availability. Please try again.");
+      setIsConfirmingOrder(false);
+      return;
+    }
+
+    const availableIds = new Set(
+      (liveItems || [])
+        .filter((item: any) => Boolean(item.active))
+        .map((item: any) => Number(item.id))
+    );
+
+    const soldOutItems = Object.values(orders)
+      .flat()
+      .filter((item) => !availableIds.has(item.id));
+
+    if (soldOutItems.length > 0) {
+      const soldOutNames = Array.from(
+        new Set(soldOutItems.map((item) => item.name))
+      );
+
+      setOrders((current) => {
+        const cleaned: Record<number, CartItem[]> = {};
+
+        Object.entries(current).forEach(
+          ([personIndex, items]) => {
+            cleaned[Number(personIndex)] = items.filter(
+              (cartItem) => availableIds.has(cartItem.id)
+            );
+          }
+        );
+
+        return cleaned;
+      });
+
+      alert(
+        `These items are now sold out and were removed from the order: ${soldOutNames.join(", ")}`
+      );
+      setIsConfirmingOrder(false);
+      return;
+    }
+  }
 
   const kitchenOrder = {
     id: Date.now(),
@@ -871,15 +1084,12 @@ router.push("/thank-you");
 
         <div>
 
-          <h1 className="text-3xl font-black">
-            <span className="text-red-600">
-              D
-            </span>
-            INEVO
+          <h1 className="max-w-[360px] truncate text-2xl font-black">
+            {settings.restaurantName}
           </h1>
 
           <p className="text-[10px] text-gray-400">
-            From Table to Kitchen, Seamlessly.
+            Powered by DINEVO
           </p>
 
         </div>
@@ -1034,13 +1244,23 @@ router.push("/thank-you");
 
                   <article
                     key={item.id}
-                    className="overflow-hidden rounded-xl border bg-white shadow-sm"
+                    className={`relative overflow-hidden rounded-xl border bg-white shadow-sm ${
+                      item.active === false ? "opacity-70" : ""
+                    }`}
                   >
+
+                    {item.active === false && (
+                      <div className="absolute left-2 top-2 z-10 rounded-full bg-red-600 px-3 py-1 text-[11px] font-black text-white shadow">
+                        SOLD OUT
+                      </div>
+                    )}
 
                     <img
                       src={item.image}
                       alt={item.name}
-                      className="h-32 w-full object-cover"
+                      className={`h-32 w-full object-cover ${
+                        item.active === false ? "grayscale" : ""
+                      }`}
                     />
 
                     <div className="p-3">
@@ -1052,7 +1272,7 @@ router.push("/thank-you");
                       <div className="mt-3 flex items-center justify-between">
 
                         <strong className="text-sm text-red-600">
-                          €{item.price.toFixed(2)}
+                          {settings.currencySymbol}{item.price.toFixed(2)}
                         </strong>
 
                         <div className="flex gap-2">
@@ -1075,11 +1295,12 @@ router.push("/thank-you");
                               addItem(item)
                             }
                             disabled={
-                              selectedPerson === null
+                              selectedPerson === null ||
+                              item.active === false
                             }
-                            className="flex h-8 w-8 items-center justify-center rounded-full bg-red-600 text-lg font-bold text-white disabled:bg-gray-300"
+                            className="flex h-8 w-8 items-center justify-center rounded-full bg-red-600 text-lg font-bold text-white disabled:cursor-not-allowed disabled:bg-gray-300"
                           >
-                            +
+                            {item.active === false ? "×" : "+"}
                           </button>
 
                         </div>
@@ -1117,6 +1338,7 @@ router.push("/thank-you");
                 setViewingGuestOrder(null)
               }
               text={text}
+              currencySymbol={settings.currencySymbol}
             />
 
           )}
@@ -1190,7 +1412,7 @@ router.push("/thank-you");
             </p>
 
             <p className="mt-1 text-xl font-black text-red-500">
-              €{tableTotal.toFixed(2)}
+              {settings.currencySymbol}{tableTotal.toFixed(2)}
             </p>
 
           </div>
@@ -1245,7 +1467,7 @@ router.push("/thank-you");
                 </h2>
 
                 <strong className="text-xl text-red-600">
-                  €{infoItem.price.toFixed(2)}
+                  {settings.currencySymbol}{infoItem.price.toFixed(2)}
                 </strong>
 
               </div>
@@ -1342,7 +1564,7 @@ router.push("/thank-you");
                         </span>
 
                         <strong>
-                          €
+                          {settings.currencySymbol}
                           {(
                             item.price *
                             item.quantity
@@ -1367,7 +1589,7 @@ router.push("/thank-you");
               </strong>
 
               <strong className="text-xl text-red-500">
-                €{tableTotal.toFixed(2)}
+                {settings.currencySymbol}{tableTotal.toFixed(2)}
               </strong>
 
             </div>
@@ -1433,6 +1655,7 @@ type GuestOrderViewProps = {
   ) => void;
 
   onBack: () => void;
+  currencySymbol: string;
 };
 
 function GuestOrderView({
@@ -1444,6 +1667,7 @@ function GuestOrderView({
   onRemove,
   onBack,
   text,
+  currencySymbol,
 }: GuestOrderViewProps) {
 
   const total =
@@ -1504,7 +1728,7 @@ function GuestOrderView({
                 </h3>
 
                 <p className="text-sm text-gray-500">
-                  €{item.price.toFixed(2)}
+                  {settings.currencySymbol}{item.price.toFixed(2)}
                 </p>
 
               </div>
@@ -1544,7 +1768,7 @@ function GuestOrderView({
                 </div>
 
                 <strong>
-                  €
+                  {currencySymbol}
                   {(
                     item.price *
                     item.quantity
@@ -1580,7 +1804,7 @@ function GuestOrderView({
         </strong>
 
         <strong className="text-2xl text-red-500">
-          €{total.toFixed(2)}
+          {currencySymbol}{total.toFixed(2)}
         </strong>
 
       </div>

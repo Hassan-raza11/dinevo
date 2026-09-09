@@ -25,12 +25,42 @@ type WaiterOrder = {
   waiterStatus?: "preparing" | "served";
 };
 
+type RestaurantSettings = {
+  restaurantName: string;
+};
+
+const defaultSettings: RestaurantSettings = {
+  restaurantName: "Dinevo Restaurant",
+};
+
 export default function WaiterPage() {
+  const [settings, setSettings] =
+    useState<RestaurantSettings>(defaultSettings);
+
   const [orders, setOrders] = useState<WaiterOrder[]>([]);
   const [servingOrderId, setServingOrderId] =
   useState<number | null>(null);
 
   useEffect(() => {
+  const loadSettings = async () => {
+    const { data, error } = await supabase
+      .from("restaurant_settings")
+      .select("restaurant_name")
+      .eq("id", 1)
+      .single();
+
+    if (error) {
+      console.error("Waiter settings load error:", error);
+      return;
+    }
+
+    if (data?.restaurant_name) {
+      setSettings({
+        restaurantName: data.restaurant_name,
+      });
+    }
+  };
+
   const loadWaiterOrders = async () => {
     const { data, error } = await supabase
       .from("orders")
@@ -102,6 +132,7 @@ export default function WaiterPage() {
   };
 
   // Load immediately
+  loadSettings();
   loadWaiterOrders();
 const refreshInterval = setInterval(() => {
   loadWaiterOrders();
@@ -196,10 +227,18 @@ const refreshInterval = setInterval(() => {
 };
 
 const printWaiterOrder = (order: WaiterOrder) => {
+  const escapeHtml = (value: unknown) =>
+    String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+
   const printWindow = window.open(
     "",
     "_blank",
-    "width=420,height=700"
+    "width=380,height=700"
   );
 
   if (!printWindow) {
@@ -210,143 +249,269 @@ const printWaiterOrder = (order: WaiterOrder) => {
   const guestSections = order.guests
     .map(
       (guest) => `
-        <div class="guest">
-          <h3>${guest.guestName}</h3>
+        <section class="guest">
+          <div class="guest-name">
+            ${escapeHtml(guest.guestName)}
+          </div>
 
           ${guest.items
             .map(
               (item) => `
                 <div class="item">
-                  <span>${item.quantity} × ${item.name}</span>
+                  <span class="qty">${item.quantity}×</span>
+                  <span class="item-name">${escapeHtml(item.name)}</span>
                 </div>
               `
             )
             .join("")}
-        </div>
+        </section>
       `
     )
     .join("");
+
+  const printedAt = new Date();
+
+  printWindow.document.open();
 
   printWindow.document.write(`
     <!DOCTYPE html>
     <html>
       <head>
-        <title>Table ${order.tableNumber}</title>
+        <meta charset="UTF-8" />
+
+        <title>
+          Service Order ${escapeHtml(order.orderNumber)}
+        </title>
 
         <style>
           @page {
-            size: 80mm auto;
-            margin: 5mm;
+            size: 58mm auto;
+            margin: 0;
+          }
+
+          * {
+            box-sizing: border-box;
+          }
+
+          html,
+          body {
+            width: 58mm;
+            margin: 0;
+            padding: 0;
+            background: white;
+            color: black;
+            font-family: Arial, Helvetica, sans-serif;
           }
 
           body {
-            font-family: Arial, sans-serif;
-            color: #000;
-            margin: 0;
-            padding: 8px;
-            font-size: 13px;
+            font-size: 10px;
+            line-height: 1.3;
           }
 
           .receipt {
-            width: 72mm;
-            margin: auto;
+            width: 58mm;
+            padding: 3mm;
+            overflow: hidden;
           }
 
           .brand {
             text-align: center;
-            font-size: 24px;
+            font-size: 16px;
+            line-height: 1.1;
             font-weight: 900;
+            overflow-wrap: anywhere;
           }
 
           .subtitle {
+            margin-top: 2px;
             text-align: center;
-            font-size: 10px;
-            margin-top: 3px;
+            font-size: 9px;
+            font-weight: 800;
           }
 
           .divider {
-            border-top: 1px dashed #000;
-            margin: 12px 0;
+            margin: 6px 0;
+            border-top: 1px dashed black;
           }
 
           .top {
             display: flex;
             justify-content: space-between;
+            gap: 6px;
+          }
+
+          .table-label {
+            font-size: 8px;
+            font-weight: 700;
           }
 
           .table {
-            font-size: 28px;
+            font-size: 25px;
+            line-height: 1;
+            font-weight: 900;
+          }
+
+          .order-info {
+            text-align: right;
+            font-size: 9px;
+            line-height: 1.4;
+            overflow-wrap: anywhere;
+          }
+
+          .service-status {
+            margin: 6px 0;
+            border: 1.5px solid black;
+            padding: 4px;
+            text-align: center;
+            font-size: 10px;
             font-weight: 900;
           }
 
           .guest {
-            margin-top: 14px;
+            margin-top: 8px;
           }
 
-          .guest h3 {
-            margin: 0 0 7px;
-            padding-bottom: 5px;
-            border-bottom: 1px solid #000;
+          .guest-name {
+            margin-bottom: 3px;
+            padding-bottom: 3px;
+            border-bottom: 1px solid black;
+            font-size: 10px;
+            font-weight: 900;
+            text-transform: uppercase;
+            overflow-wrap: anywhere;
           }
 
           .item {
-            padding: 5px 0;
+            display: flex;
+            gap: 5px;
+            padding: 3px 0;
+            font-size: 11px;
+            font-weight: 700;
+          }
+
+          .qty {
+            flex: 0 0 auto;
+            min-width: 20px;
+            font-weight: 900;
+          }
+
+          .item-name {
+            min-width: 0;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+          }
+
+          .print-time {
+            margin-top: 7px;
+            padding-top: 5px;
+            border-top: 1px dotted #777;
+            display: flex;
+            justify-content: space-between;
+            gap: 5px;
+            font-size: 8px;
           }
 
           .footer {
-            margin-top: 18px;
+            margin-top: 9px;
             text-align: center;
-            font-weight: 700;
+            font-size: 9px;
+            font-weight: 900;
+          }
+
+          .powered {
+            margin-top: 2px;
+            text-align: center;
+            font-size: 7px;
+          }
+
+          @media print {
+            html,
+            body,
+            .receipt {
+              width: 58mm !important;
+              min-width: 58mm !important;
+              max-width: 58mm !important;
+            }
           }
         </style>
       </head>
 
       <body>
         <div class="receipt">
-
-          <div class="brand">DINEVO</div>
+          <div class="brand">
+            ${escapeHtml(settings.restaurantName)}
+          </div>
 
           <div class="subtitle">
-            SERVICE ORDER
+            WAITER SERVICE SLIP
           </div>
 
           <div class="divider"></div>
 
           <div class="top">
             <div>
-              <div>TABLE</div>
+              <div class="table-label">TABLE</div>
+
               <div class="table">
-                ${order.tableNumber}
+                ${escapeHtml(order.tableNumber)}
               </div>
             </div>
 
-            <div>
-              <div>Order #${order.orderNumber}</div>
-              <div>
-                ${new Date(order.createdAt).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </div>
+            <div class="order-info">
+              <strong>
+                Order #${escapeHtml(order.orderNumber)}
+              </strong>
+
+              <br />
+
+              ${new Date(order.createdAt).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
             </div>
           </div>
 
-          <div class="divider"></div>
+          <div class="service-status">
+            READY TO SERVE
+          </div>
 
           ${guestSections}
 
-          <div class="divider"></div>
+          <div class="print-time">
+            <span>Printed</span>
+
+            <strong>
+              ${printedAt.toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </strong>
+          </div>
 
           <div class="footer">
             SERVICE LIST
           </div>
 
+          <div class="powered">
+            Powered by DINEVO
+          </div>
         </div>
 
         <script>
-          window.onload = () => {
-            window.print();
-          };
+          window.addEventListener("load", function () {
+            window.focus();
+
+            setTimeout(function () {
+              window.print();
+            }, 250);
+          });
+
+          window.addEventListener(
+            "afterprint",
+            function () {
+              window.close();
+            }
+          );
         </script>
       </body>
     </html>
