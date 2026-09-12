@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+
 
 type MenuItem = {
   id: number;
@@ -501,6 +502,7 @@ const text =
     useState<MenuItem | null>(null);
 const [isConfirmingOrder, setIsConfirmingOrder] =
   useState(false);
+const confirmLockRef = useRef(false);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -894,197 +896,230 @@ return () => {
     });
 
   const confirmOrder = async () => {
-  if (isConfirmingOrder) return;
-  if (tableTotal === 0) return;
+    // State disables the UI; the ref is an immediate lock against very fast
+    // double-clicks before React has rendered the disabled state.
+    if (confirmLockRef.current || isConfirmingOrder) return;
 
-  setIsConfirmingOrder(true);
-
-  const orderedItemIds = Array.from(
-    new Set(
-      Object.values(orders)
-        .flat()
-        .map((item) => item.id)
-    )
-  );
-
-  if (orderedItemIds.length > 0) {
-    const { data: liveItems, error: availabilityError } =
-      await supabase
-        .from("menu_items")
-        .select("id, active")
-        .in("id", orderedItemIds);
-
-    if (availabilityError) {
-      console.error(
-        "Availability check error:",
-        availabilityError
-      );
-      alert("Could not verify item availability. Please try again.");
-      setIsConfirmingOrder(false);
+    if (tableTotal <= 0) {
+      alert("Please add at least one item before confirming the order.");
       return;
     }
 
-    const availableIds = new Set(
-      (liveItems || [])
-        .filter((item: any) => Boolean(item.active))
-        .map((item: any) => Number(item.id))
-    );
+    const guestsWithItems = people
+      .map((person, personIndex) => ({
+        guestName: person,
+        items: orders[personIndex] || [],
+      }))
+      .filter((guest) => guest.items.length > 0);
 
-    const soldOutItems = Object.values(orders)
-      .flat()
-      .filter((item) => !availableIds.has(item.id));
+    if (guestsWithItems.length === 0) {
+      alert("Please add at least one item before confirming the order.");
+      return;
+    }
 
-    if (soldOutItems.length > 0) {
-      const soldOutNames = Array.from(
-        new Set(soldOutItems.map((item) => item.name))
+    if (serviceType !== "takeaway" && !String(tableNumber).trim()) {
+      alert("Table number is missing. Please return to the start screen and select a table.");
+      return;
+    }
+
+    confirmLockRef.current = true;
+    setIsConfirmingOrder(true);
+
+    let createdOrderId: number | string | null = null;
+
+    try {
+      const orderedItemIds = Array.from(
+        new Set(
+          guestsWithItems
+            .flatMap((guest) => guest.items)
+            .map((item) => item.id)
+        )
       );
 
-      setOrders((current) => {
-        const cleaned: Record<number, CartItem[]> = {};
+      // Final server-side availability check immediately before creating order.
+      const { data: liveItems, error: availabilityError } =
+        await supabase
+          .from("menu_items")
+          .select("id, active")
+          .in("id", orderedItemIds);
 
-        Object.entries(current).forEach(
-          ([personIndex, items]) => {
-            cleaned[Number(personIndex)] = items.filter(
-              (cartItem) => availableIds.has(cartItem.id)
-            );
-          }
+      if (availabilityError) {
+        throw new Error(
+          "We could not verify the latest menu availability. Please check the connection and try again."
+        );
+      }
+
+      const availableIds = new Set(
+        (liveItems || [])
+          .filter((item: any) => Boolean(item.active))
+          .map((item: any) => Number(item.id))
+      );
+
+      const soldOutItems = guestsWithItems
+        .flatMap((guest) => guest.items)
+        .filter((item) => !availableIds.has(item.id));
+
+      if (soldOutItems.length > 0) {
+        const soldOutNames = Array.from(
+          new Set(soldOutItems.map((item) => item.name))
         );
 
-        return cleaned;
-      });
+        setOrders((current) => {
+          const cleaned: Record<number, CartItem[]> = {};
 
-      alert(
-        `These items are now sold out and were removed from the order: ${soldOutNames.join(", ")}`
-      );
-      setIsConfirmingOrder(false);
-      return;
-    }
-  }
+          Object.entries(current).forEach(([personIndex, items]) => {
+            cleaned[Number(personIndex)] = items.filter((cartItem) =>
+              availableIds.has(cartItem.id)
+            );
+          });
 
-  const kitchenOrder = {
-    id: Date.now(),
-    orderNumber: String(Date.now()).slice(-5),
-    tableNumber,
-    serviceType,
-    language,
-    createdAt: Date.now(),
-   
+          return cleaned;
+        });
 
-    guests: people.map((person, personIndex) => ({
-      guestName: person,
-
-      items: (orders[personIndex] || []).map((item) => ({
-        id: item.id,
-        name: item.name,
-        quantity: item.quantity,
-        price: item.price,
-
-        // Route using the station configured in Supabase.
-        station: item.station || "kitchen",
-
-        done: false,
-      })),
-    })),
-
-    total: tableTotal,
-  };
-
-  
-
-  // Keep this because the thank-you page currently reads it
-  localStorage.setItem(
-  "dinevo-confirmed-order",
-  JSON.stringify(kitchenOrder)
-);
-
-// SAVE ORDER TO SUPABASE
-try {
-  const { data: supabaseOrder, error: orderError } =
-    await supabase
-      .from("orders")
-      .insert({
-        order_number: String(kitchenOrder.orderNumber),
-        table_number: String(kitchenOrder.tableNumber),
-        service_type: "dine-in",
-        total: kitchenOrder.total,
-        kitchen_status: "pending",
-        waiter_status: "waiting",
-        payment_status: "unpaid",
-      })
-      .select("id")
-      .single();
-
-  if (orderError) {
-    throw orderError;
-  }
-
-  for (const guest of kitchenOrder.guests) {
-    const { data: supabaseGuest, error: guestError } =
-      await supabase
-        .from("order_guests")
-        .insert({
-          order_id: supabaseOrder.id,
-          guest_name: guest.guestName,
-        })
-        .select("id")
-        .single();
-
-    if (guestError) {
-      throw guestError;
-    }
-
-    const items = guest.items.map((item: any) => ({
-      order_id: supabaseOrder.id,
-      guest_id: supabaseGuest.id,
-      item_name: item.name,
-      price: item.price,
-      quantity: item.quantity,
-      station: item.station || "kitchen",
-    }));
-
-    if (items.length > 0) {
-      const { error: itemsError } = await supabase
-        .from("order_items")
-        .insert(items);
-
-      if (itemsError) {
-        throw itemsError;
+        alert(
+          `These items are now sold out and were removed from the order: ${soldOutNames.join(", ")}`
+        );
+        return;
       }
+
+      const now = Date.now();
+      const kitchenOrder = {
+        id: now,
+        orderNumber: String(now).slice(-5),
+        tableNumber,
+        serviceType,
+        language,
+        createdAt: now,
+        guests: guestsWithItems.map((guest) => ({
+          guestName: guest.guestName,
+          items: guest.items.map((item) => ({
+            id: item.id,
+            name: item.name,
+            quantity: item.quantity,
+            price: item.price,
+            station: item.station || "kitchen",
+            done: false,
+          })),
+        })),
+        total: tableTotal,
+      };
+
+      const { data: supabaseOrder, error: orderError } =
+        await supabase
+          .from("orders")
+          .insert({
+            order_number: String(kitchenOrder.orderNumber),
+            table_number: String(kitchenOrder.tableNumber),
+            service_type:
+              kitchenOrder.serviceType === "takeaway"
+                ? "takeaway"
+                : "dine-in",
+            total: kitchenOrder.total,
+            kitchen_status: "pending",
+            waiter_status: "waiting",
+            payment_status: "unpaid",
+          })
+          .select("id")
+          .single();
+
+      if (orderError || !supabaseOrder?.id) {
+        throw orderError || new Error("The order could not be created.");
+      }
+
+      createdOrderId = supabaseOrder.id;
+
+      for (const guest of kitchenOrder.guests) {
+        const { data: supabaseGuest, error: guestError } =
+          await supabase
+            .from("order_guests")
+            .insert({
+              order_id: createdOrderId,
+              guest_name: guest.guestName,
+            })
+            .select("id")
+            .single();
+
+        if (guestError || !supabaseGuest?.id) {
+          throw guestError || new Error("A guest could not be saved.");
+        }
+
+        const items = guest.items.map((item) => ({
+          order_id: createdOrderId,
+          guest_id: supabaseGuest.id,
+          item_name: item.name,
+          price: item.price,
+          quantity: item.quantity,
+          station: item.station || "kitchen",
+        }));
+
+        if (items.length > 0) {
+          const { error: itemsError } = await supabase
+            .from("order_items")
+            .insert(items);
+
+          if (itemsError) throw itemsError;
+        }
+      }
+
+      // Only expose the order to the thank-you page after every database write
+      // has succeeded.
+      localStorage.setItem(
+        "dinevo-confirmed-order",
+        JSON.stringify(kitchenOrder)
+      );
+
+      router.push("/thank-you");
+    } catch (error: any) {
+      console.error("Customer order submission failed:", error);
+
+      // The current schema creates parent/guest/item rows separately.
+      // If a later insert fails, remove the partial order so Kitchen never sees
+      // an incomplete ticket. FK cascades may remove children automatically;
+      // explicit child deletes keep this safe when cascade is not configured.
+      if (createdOrderId !== null) {
+        try {
+          await supabase
+            .from("order_items")
+            .delete()
+            .eq("order_id", createdOrderId);
+
+          await supabase
+            .from("order_guests")
+            .delete()
+            .eq("order_id", createdOrderId);
+
+          await supabase
+            .from("orders")
+            .delete()
+            .eq("id", createdOrderId);
+        } catch (cleanupError) {
+          console.error("Partial order cleanup failed:", cleanupError);
+        }
+      }
+
+      const message =
+        error?.message ||
+        "The order could not be sent. Please check the connection and try again.";
+
+      alert(`ORDER NOT SENT:\n\n${message}`);
+    } finally {
+      confirmLockRef.current = false;
+      setIsConfirmingOrder(false);
     }
-  }
-
-  console.log(
-    "Order successfully saved to Supabase:",
-    supabaseOrder.id
-  );
-} catch (error: any) {
-  console.error("Supabase order save failed:", error);
-
-  alert(
-    `ORDER ERROR:
-
-${error?.message || JSON.stringify(error)}`
-  );
-
-  setIsConfirmingOrder(false);
-  return;
-}
-
-router.push("/thank-you");
-};
+  };
 
     
 
   return (
-    <main className="min-h-screen bg-[#f5f5f5]">
+    <main className="min-h-screen overflow-x-hidden bg-[#f5f5f5]">
 
       {/* HEADER */}
 
-      <header className="flex h-20 items-center justify-between bg-black px-7 text-white">
+      <header className="flex min-h-20 flex-wrap items-center justify-between gap-3 bg-black px-3 py-3 text-white sm:px-5 lg:h-20 lg:flex-nowrap lg:px-7 lg:py-0">
 
         <div>
 
-          <h1 className="max-w-[360px] truncate text-2xl font-black">
+          <h1 className="max-w-[190px] truncate text-lg font-black sm:max-w-[300px] sm:text-2xl lg:max-w-[360px]">
             {settings.restaurantName}
           </h1>
 
@@ -1094,7 +1129,7 @@ router.push("/thank-you");
 
         </div>
 
-        <div className="flex gap-10 text-lg font-bold">
+        <div className="order-3 flex w-full items-center justify-between gap-3 border-t border-white/10 pt-2 text-sm font-bold sm:order-none sm:w-auto sm:border-0 sm:pt-0 sm:text-base lg:gap-10 lg:text-lg">
 
           <span>
             {text.table} {tableNumber || "—"}
@@ -1108,7 +1143,7 @@ router.push("/thank-you");
 
         </div>
 
-        <div className="rounded-xl border border-white/20 px-4 py-2">
+        <div className="rounded-xl border border-white/20 px-3 py-2 text-xs sm:px-4 sm:text-sm">
 
           {language === "fr"
             ? "🇫🇷 Français"
@@ -1128,17 +1163,17 @@ router.push("/thank-you");
 
       {/* MAIN */}
 
-      <div className="grid min-h-[calc(100vh-80px)] grid-cols-[190px_minmax(0,1fr)_170px]">
+      <div className="grid min-h-[calc(100vh-80px)] grid-cols-1 lg:grid-cols-[170px_minmax(0,1fr)_160px] xl:grid-cols-[190px_minmax(0,1fr)_170px]">
 
         {/* LEFT MENU */}
 
-        <aside className="bg-[#111214] p-3 text-white">
+        <aside className="bg-[#111214] p-3 text-white lg:min-h-full">
 
-          <h2 className="mb-4 px-2 text-sm font-bold">
+          <h2 className="mb-3 px-1 text-sm font-bold lg:mb-4 lg:px-2">
            {text.menu}
           </h2>
 
-          <div className="space-y-2">
+          <div className="flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-2 lg:overflow-visible lg:pb-0">
 
             {menuCategories.map((item) => (
 
@@ -1147,7 +1182,7 @@ router.push("/thank-you");
   item as keyof typeof text.categories
 ]}
                 onClick={() => setCategory(item)}
-                className={`w-full rounded-lg px-3 py-3 text-left text-xs font-semibold ${
+                className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-3 text-left text-xs font-semibold lg:w-full lg:whitespace-normal ${
                   category === item
                     ? "bg-red-600"
                     : "bg-[#222326] hover:bg-[#303135]"
@@ -1166,7 +1201,7 @@ router.push("/thank-you");
 
         {/* CENTER */}
 
-        <section className="p-5">
+        <section className="min-w-0 p-3 sm:p-4 lg:p-5">
 
           {viewingGuestOrder === null ? (
 
@@ -1174,7 +1209,7 @@ router.push("/thank-you");
 
               {/* TOP BAR */}
 
-              <div className="mb-5 flex items-center gap-3">
+              <div className="mb-4 flex flex-wrap items-center gap-2 sm:mb-5 sm:gap-3">
 
                 
 
@@ -1184,7 +1219,7 @@ router.push("/thank-you");
                     onClick={() =>
                       setShowGuestInput(true)
                     }
-                    className="rounded-xl bg-black px-5 py-3 font-bold text-white"
+                    className="min-h-11 rounded-xl bg-black px-4 py-3 text-sm font-bold text-white sm:px-5 sm:text-base"
                   >
                     {text.guest}
                   </button>
@@ -1195,7 +1230,7 @@ router.push("/thank-you");
 
               {showGuestInput && (
 
-                <div className="mb-5 flex gap-2">
+                <div className="mb-5 flex flex-col gap-2 sm:flex-row">
 
                   <input
                     value={newGuestName}
@@ -1205,12 +1240,12 @@ router.push("/thank-you");
                       )
                     }
                     placeholder={text.guestName}
-                    className="rounded-xl border-2 border-black bg-white px-4 py-3 font-semibold text-black placeholder:text-gray-500 outline-none focus:border-red-600"
+                    className="min-h-12 w-full min-w-0 flex-1 rounded-xl border-2 border-black bg-white px-4 py-3 font-semibold text-black placeholder:text-gray-500 outline-none focus:border-red-600"
                   />
 
                   <button
                     onClick={addGuest}
-                    className="rounded-xl bg-red-600 px-5 font-bold text-white"
+                    className="min-h-11 rounded-xl bg-red-600 px-5 py-3 font-bold text-white"
                   >
                    {text.add}
                   </button>
@@ -1219,7 +1254,7 @@ router.push("/thank-you");
                     onClick={() =>
                       setShowGuestInput(false)
                     }
-                    className="rounded-xl bg-gray-200 px-4"
+                    className="min-h-11 rounded-xl bg-gray-200 px-4 py-3"
                   >
                    {text.cancel}
                   </button>
@@ -1238,7 +1273,7 @@ router.push("/thank-you");
 
               {/* FOOD GRID */}
 
-              <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
+              <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 sm:gap-4 md:grid-cols-3 xl:grid-cols-4">
 
                 {filteredMenu.map((item) => (
 
@@ -1255,13 +1290,19 @@ router.push("/thank-you");
                       </div>
                     )}
 
-                    <img
-                      src={item.image}
-                      alt={item.name}
-                      className={`h-32 w-full object-cover ${
-                        item.active === false ? "grayscale" : ""
-                      }`}
-                    />
+                    {item.image ? (
+                      <img
+                        src={item.image}
+                        alt={item.name}
+                        className={`h-36 w-full object-cover sm:h-32 ${
+                          item.active === false ? "grayscale" : ""
+                        }`}
+                      />
+                    ) : (
+                      <div className="flex h-36 w-full items-center justify-center bg-gray-100 text-xs font-semibold text-gray-400 sm:h-32">
+                        No image
+                      </div>
+                    )}
 
                     <div className="p-3">
 
@@ -1283,7 +1324,7 @@ router.push("/thank-you");
                             onClick={() =>
                               setInfoItem(item)
                             }
-                            className="flex h-8 w-8 items-center justify-center rounded-full border border-gray-300 font-serif font-bold text-gray-600 hover:bg-gray-100"
+                            className="flex h-10 w-10 items-center justify-center rounded-full border sm:h-8 sm:w-8 border-gray-300 font-serif font-bold text-gray-600 hover:bg-gray-100"
                           >
                             i
                           </button>
@@ -1298,7 +1339,7 @@ router.push("/thank-you");
                               selectedPerson === null ||
                               item.active === false
                             }
-                            className="flex h-8 w-8 items-center justify-center rounded-full bg-red-600 text-lg font-bold text-white disabled:cursor-not-allowed disabled:bg-gray-300"
+                            className="flex h-10 w-10 items-center justify-center rounded-full bg-red-600 sm:h-8 sm:w-8 text-lg font-bold text-white disabled:cursor-not-allowed disabled:bg-gray-300"
                           >
                             {item.active === false ? "×" : "+"}
                           </button>
@@ -1347,13 +1388,13 @@ router.push("/thank-you");
 
         {/* RIGHT GUESTS */}
 
-        <aside className="bg-[#111214] p-3 text-white">
+        <aside className="border-t border-white/10 bg-[#111214] p-3 text-white lg:min-h-full lg:border-t-0">
 
           <h2 className="mb-4 text-sm font-bold">
           {text.guests}
           </h2>
 
-          <div className="space-y-2">
+          <div className="flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-2 lg:overflow-visible lg:pb-0">
 
             {people.map((person, index) => {
 
@@ -1448,21 +1489,27 @@ router.push("/thank-you");
 
       {infoItem && (
 
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-2 sm:p-6">
 
-          <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white">
+          <div className="max-h-[95vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white sm:rounded-3xl">
 
-            <img
-              src={infoItem.image}
-              alt={infoItem.name}
-              className="h-56 w-full object-cover"
-            />
+            {infoItem.image ? (
+              <img
+                src={infoItem.image}
+                alt={infoItem.name}
+                className="h-44 w-full object-cover sm:h-56"
+              />
+            ) : (
+              <div className="flex h-44 w-full items-center justify-center bg-gray-100 text-sm font-semibold text-gray-400 sm:h-56">
+                No image
+              </div>
+            )}
 
-            <div className="p-6">
+            <div className="p-4 sm:p-6">
 
-              <div className="flex justify-between">
+              <div className="flex flex-wrap justify-between gap-3">
 
-                <h2 className="text-2xl font-bold">
+                <h2 className="text-xl font-bold sm:text-2xl">
                   {infoItem.name}
                 </h2>
 
@@ -1505,11 +1552,11 @@ router.push("/thank-you");
 
       {showTableOrder && (
 
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-2 sm:p-6">
 
-          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white p-7">
+          <div className="max-h-[95vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-4 sm:rounded-3xl sm:p-7">
 
-            <div className="flex justify-between">
+            <div className="flex flex-wrap justify-between gap-3">
 
               <div>
 
@@ -1517,7 +1564,7 @@ router.push("/thank-you");
                   DINEVO
                 </p>
 
-                <h2 className="text-3xl font-bold">
+                <h2 className="text-2xl font-bold sm:text-3xl">
                   {text.table} {tableNumber} {text.order}
                 </h2>
 
@@ -1556,7 +1603,7 @@ router.push("/thank-you");
 
                       <div
                         key={item.id}
-                        className="mt-3 flex justify-between"
+                        className="mt-3 flex items-start justify-between gap-3"
                       >
 
                         <span>
@@ -1582,7 +1629,7 @@ router.push("/thank-you");
 
             </div>
 
-            <div className="mt-6 flex justify-between rounded-xl bg-black p-5 text-white">
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-black p-4 text-white sm:p-5">
 
               <strong>
                {text.tableTotal}
@@ -1594,7 +1641,7 @@ router.push("/thank-you");
 
             </div>
 
-            <div className="mt-5 flex gap-3">
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row">
 
               <button
                 onClick={() =>
@@ -1679,9 +1726,9 @@ function GuestOrderView({
 
   return (
 
-    <div className="mx-auto max-w-3xl">
+    <div className="mx-auto w-full max-w-3xl">
 
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-5 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-center sm:justify-between">
 
         <div>
 
@@ -1689,7 +1736,7 @@ function GuestOrderView({
            {text.currentOrder}
           </p>
 
-          <h2 className="text-3xl font-bold">
+          <h2 className="text-2xl font-bold sm:text-3xl">
             {guestName}
           </h2>
 
@@ -1697,7 +1744,7 @@ function GuestOrderView({
 
         <button
           onClick={onBack}
-          className="rounded-xl bg-black px-5 py-3 font-bold text-white"
+          className="min-h-11 rounded-xl bg-black px-4 py-3 text-sm font-bold text-white sm:px-5 sm:text-base"
         >
          ← {text.backToMenu}
         </button>
@@ -1706,7 +1753,7 @@ function GuestOrderView({
 
       {order.length === 0 ? (
 
-        <div className="rounded-2xl bg-white p-10 text-center text-gray-400">
+        <div className="rounded-2xl bg-white p-6 text-center text-gray-400 sm:p-10">
           {text.noItems}
         </div>
 
@@ -1718,7 +1765,7 @@ function GuestOrderView({
 
             <div
               key={item.id}
-              className="flex items-center justify-between rounded-xl bg-white p-4 shadow-sm"
+              className="flex flex-col gap-4 rounded-xl bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between"
             >
 
               <div>
@@ -1733,7 +1780,7 @@ function GuestOrderView({
 
               </div>
 
-              <div className="flex items-center gap-5">
+              <div className="flex w-full flex-wrap items-center justify-between gap-3 sm:w-auto sm:justify-end sm:gap-5">
 
                 <div className="flex items-center rounded-lg border">
 
@@ -1744,7 +1791,7 @@ function GuestOrderView({
                         item.id
                       )
                     }
-                    className="px-3 py-2"
+                    className="min-h-11 min-w-11 px-3 py-2"
                   >
                     −
                   </button>
@@ -1760,7 +1807,7 @@ function GuestOrderView({
                         item.id
                       )
                     }
-                    className="px-3 py-2"
+                    className="min-h-11 min-w-11 px-3 py-2"
                   >
                     +
                   </button>
@@ -1797,7 +1844,7 @@ function GuestOrderView({
 
       )}
 
-      <div className="mt-6 flex justify-between rounded-xl bg-black p-5 text-white">
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-black p-4 text-white sm:p-5">
 
         <strong>
           {guestName} {text.total}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 export default function StaffGuard({
   children,
@@ -9,20 +9,28 @@ export default function StaffGuard({
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
 
   const [allowed, setAllowed] = useState(false);
 
   useEffect(() => {
-    const access =
-      localStorage.getItem("dinevo-staff-access");
+    const access = localStorage.getItem(
+      "dinevo-staff-access"
+    );
 
-    if (access !== "true") {
-      router.replace("/staff-login");
+    if (access === "true") {
+      setAllowed(true);
       return;
     }
 
-    setAllowed(true);
-  }, [router]);
+    // Remember the page the staff member wanted to open
+    sessionStorage.setItem(
+      "dinevo-staff-destination",
+      pathname
+    );
+
+    router.replace("/staff-login");
+  }, [pathname, router]);
 
   if (!allowed) {
     return (

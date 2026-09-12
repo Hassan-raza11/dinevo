@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import StaffGuard from "@/components/StaffGuard";
+import StaffLogout from "@/components/StaffLogout";
 
 type PaymentPart = {
   id: number;
@@ -98,6 +99,9 @@ const [newDishCategoryId, setNewDishCategoryId] =
 
 const [newDishImageUrl, setNewDishImageUrl] =
   useState("");
+
+const [isUploadingDishImage, setIsUploadingDishImage] =
+  useState(false);
 
 const [newDishVegetarian, setNewDishVegetarian] =
   useState(false);
@@ -789,6 +793,62 @@ const selectedDayReport = useMemo(() => {
     alert("Restaurant settings saved successfully.");
   };
 
+const uploadDishImage = async (file: File, mode: "new" | "edit") => {
+  if (!file.type.startsWith("image/")) {
+    alert("Please select an image file.");
+    return;
+  }
+
+  if (file.size > 5 * 1024 * 1024) {
+    alert("Please choose an image smaller than 5 MB.");
+    return;
+  }
+
+  setIsUploadingDishImage(true);
+
+  try {
+    const extension = file.name.split(".").pop()?.toLowerCase() || "jpg";
+    const safeExtension = extension.replace(/[^a-z0-9]/g, "") || "jpg";
+    const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${safeExtension}`;
+    const filePath = `dishes/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("menu-images")
+      .upload(filePath, file, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: file.type,
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data: publicUrlData } = supabase.storage
+      .from("menu-images")
+      .getPublicUrl(filePath);
+
+    const publicUrl = publicUrlData.publicUrl;
+    if (!publicUrl) throw new Error("Could not create the image URL.");
+
+    if (mode === "new") {
+      setNewDishImageUrl(publicUrl);
+    } else {
+      setEditingDish((current) =>
+        current ? { ...current, image_url: publicUrl } : current
+      );
+    }
+  } catch (error: any) {
+    console.error("Dish image upload error:", error);
+    alert(
+      `Could not upload the image.\n\n${
+        error?.message ||
+        'Make sure the Supabase Storage bucket "menu-images" exists and allows uploads.'
+      }`
+    );
+  } finally {
+    setIsUploadingDishImage(false);
+  }
+};
+
 const addDish = async () => {
   if (!newDishName.trim()) {
     alert("Please enter the dish name.");
@@ -978,16 +1038,16 @@ const saveEditedDish = async () => {
 
   return (
     <StaffGuard>
-    <main className="min-h-screen bg-[#0d0f10] text-white">
+    <main className="min-h-screen overflow-x-hidden bg-[#0d0f10] text-white">
 
 
 
       {/* HEADER */}
 
-      <header className="flex items-center justify-between border-b border-white/10 px-7 py-5">
+      <header className="flex flex-col gap-4 border-b border-white/10 px-4 py-4 sm:px-6 sm:py-5 lg:flex-row lg:items-center lg:justify-between lg:px-7">
 
         <div>
-          <h1 className="text-3xl font-black">
+          <h1 className="text-2xl font-black sm:text-3xl">
             DINE
             <span className="text-red-500">
               VO
@@ -999,9 +1059,9 @@ const saveEditedDish = async () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:gap-3 lg:w-auto lg:justify-end">
 
-          <div className="rounded-xl bg-[#171a1d] px-5 py-3 text-right">
+          <div className="min-w-[120px] flex-1 rounded-xl bg-[#171a1d] px-4 py-3 text-center sm:flex-none sm:px-5 sm:text-right">
 
             <p className="font-bold">
               {now
@@ -1022,17 +1082,19 @@ const saveEditedDish = async () => {
 
 <button
   onClick={() => setShowMenuManagement(true)}
-  className="rounded-xl bg-red-600 px-5 py-3 font-bold text-white transition hover:bg-red-700"
+  className="min-h-11 flex-1 rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-red-700 sm:flex-none sm:px-5 sm:text-base"
 >
   Menu Management
 </button>
 
           <button
             onClick={resetDemo}
-            className="rounded-xl border border-red-500/40 bg-red-500/10 px-5 py-3 font-bold text-red-400 transition hover:bg-red-600 hover:text-white"
+            className="min-h-11 flex-1 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-400 transition hover:bg-red-600 hover:text-white sm:flex-none sm:px-5 sm:text-base"
           >
             Reset Demo
           </button>
+
+          <StaffLogout />
 
         </div>
 
@@ -1040,43 +1102,43 @@ const saveEditedDish = async () => {
 
       {/* DASHBOARD */}
 
-      <section className="p-6">
+      <section className="p-3 sm:p-4 lg:p-6">
 
         {/* STAT CARDS */}
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
 
-          <div className="rounded-2xl border border-white/10 bg-[#141719] p-5">
+          <div className="rounded-2xl border border-white/10 bg-[#141719] p-4 sm:p-5">
 
             <p className="text-sm font-bold text-gray-500">
               TODAY&apos;S ORDERS
             </p>
 
-            <p className="mt-3 text-4xl font-black">
+            <p className="mt-3 text-3xl font-black sm:text-4xl">
               {todayOrders.length}
             </p>
 
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-[#141719] p-5">
+          <div className="rounded-2xl border border-white/10 bg-[#141719] p-4 sm:p-5">
 
             <p className="text-sm font-bold text-gray-500">
               ACTIVE ORDERS
             </p>
 
-            <p className="mt-3 text-4xl font-black text-orange-400">
+            <p className="mt-3 text-3xl font-black sm:text-4xl text-orange-400">
               {activeOrders.length}
             </p>
 
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-[#141719] p-5">
+          <div className="rounded-2xl border border-white/10 bg-[#141719] p-4 sm:p-5">
 
             <p className="text-sm font-bold text-gray-500">
               PAID ORDERS
             </p>
 
-            <p className="mt-3 text-4xl font-black text-green-500">
+            <p className="mt-3 text-3xl font-black sm:text-4xl text-green-500">
               {paidOrders.length}
             </p>
 
@@ -1088,7 +1150,7 @@ const saveEditedDish = async () => {
               TODAY&apos;S REVENUE
             </p>
 
-            <p className="mt-3 text-4xl font-black text-red-500">
+            <p className="mt-3 text-3xl font-black sm:text-4xl text-red-500">
               {settings.currencySymbol}
               {todayRevenue.toFixed(2)}
             </p>
@@ -1097,47 +1159,47 @@ const saveEditedDish = async () => {
 
         </div>
 {/* TODAY'S PAYMENT BREAKDOWN */}
-<div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+<div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
 
-  <div className="rounded-2xl border border-white/10 bg-[#141719] p-5">
+  <div className="rounded-2xl border border-white/10 bg-[#141719] p-4 sm:p-5">
     <p className="text-sm font-bold text-gray-500">
       CASH
     </p>
 
-    <p className="mt-3 text-3xl font-black">
+    <p className="mt-3 text-2xl font-black sm:text-3xl">
       {settings.currencySymbol}
       {todayPaymentBreakdown.cash.toFixed(2)}
     </p>
   </div>
 
-  <div className="rounded-2xl border border-white/10 bg-[#141719] p-5">
+  <div className="rounded-2xl border border-white/10 bg-[#141719] p-4 sm:p-5">
     <p className="text-sm font-bold text-gray-500">
       CARD
     </p>
 
-    <p className="mt-3 text-3xl font-black">
+    <p className="mt-3 text-2xl font-black sm:text-3xl">
       {settings.currencySymbol}
       {todayPaymentBreakdown.card.toFixed(2)}
     </p>
   </div>
 
-  <div className="rounded-2xl border border-white/10 bg-[#141719] p-5">
+  <div className="rounded-2xl border border-white/10 bg-[#141719] p-4 sm:p-5">
     <p className="text-sm font-bold text-gray-500">
       TICKET RESTAURANT
     </p>
 
-    <p className="mt-3 text-3xl font-black">
+    <p className="mt-3 text-2xl font-black sm:text-3xl">
       {settings.currencySymbol}
       {todayPaymentBreakdown.ticket.toFixed(2)}
     </p>
   </div>
 
-  <div className="rounded-2xl border border-white/10 bg-[#141719] p-5">
+  <div className="rounded-2xl border border-white/10 bg-[#141719] p-4 sm:p-5">
     <p className="text-sm font-bold text-gray-500">
       OTHER
     </p>
 
-    <p className="mt-3 text-3xl font-black">
+    <p className="mt-3 text-2xl font-black sm:text-3xl">
       {settings.currencySymbol}
       {todayPaymentBreakdown.other.toFixed(2)}
     </p>
@@ -1147,13 +1209,13 @@ const saveEditedDish = async () => {
 
         {/* MAIN ROW */}
 
-        <div className="mt-6 grid gap-5 xl:grid-cols-[1fr_360px]">
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:mt-6 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
 
           {/* TODAY'S ORDERS */}
 
-          <section className="rounded-2xl border border-white/10 bg-[#141719] p-5">
+          <section className="rounded-2xl border border-white/10 bg-[#141719] p-4 sm:p-5">
 
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-3">
 
               <div>
                 <h2 className="text-xl font-black">
@@ -1188,7 +1250,7 @@ const saveEditedDish = async () => {
 
                     <div
                       key={order.id}
-                      className="grid grid-cols-4 items-center rounded-xl border border-white/5 bg-[#1a1e21] p-4"
+                      className="grid grid-cols-2 gap-3 rounded-xl border border-white/5 bg-[#1a1e21] p-4 sm:grid-cols-4 sm:items-center sm:gap-0"
                     >
 
                       <div>
@@ -1267,7 +1329,7 @@ const saveEditedDish = async () => {
 
           {/* RESTAURANT SETTINGS */}
 
-          <aside className="rounded-2xl border border-white/10 bg-[#141719] p-5">
+          <aside className="rounded-2xl border border-white/10 bg-[#141719] p-4 sm:p-5">
 
             <div className="flex items-start justify-between">
 
@@ -1314,7 +1376,7 @@ const saveEditedDish = async () => {
                   Tax
                 </p>
 
-                <div className="mt-2 flex items-center justify-between">
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
 
                   <strong>
                     Included Tax
@@ -1336,7 +1398,7 @@ const saveEditedDish = async () => {
                   Kitchen Target
                 </p>
 
-                <div className="mt-2 flex items-center justify-between">
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
 
                   <strong>
                     Preparation Time
@@ -1358,7 +1420,7 @@ const saveEditedDish = async () => {
                   Currency
                 </p>
 
-                <div className="mt-2 flex items-center justify-between">
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
 
                   <strong>
                     {settings.currency}
@@ -1380,9 +1442,9 @@ const saveEditedDish = async () => {
 
       </section>
 {/* TODAY'S ITEM SALES */}
-<section className="mt-6 rounded-2xl border border-white/10 bg-[#141719] p-5">
+<section className="mt-6 rounded-2xl border border-white/10 bg-[#141719] p-4 sm:p-5">
 
-  <div className="flex items-center justify-between">
+  <div className="flex flex-wrap items-center justify-between gap-3">
     <div>
       <h2 className="text-xl font-black">
         TODAY&apos;S ITEM SALES
@@ -1407,7 +1469,7 @@ const saveEditedDish = async () => {
       todayItemSales.map((item) => (
         <div
           key={item.name}
-          className="grid grid-cols-[1fr_120px_150px] items-center rounded-xl border border-white/5 bg-[#1a1e21] p-4"
+          className="grid grid-cols-1 gap-3 rounded-xl border border-white/5 bg-[#1a1e21] p-4 sm:grid-cols-[1fr_100px_130px] sm:items-center md:grid-cols-[1fr_120px_150px]"
         >
           <div>
             <p className="font-black">
@@ -1443,9 +1505,9 @@ const saveEditedDish = async () => {
 </section>
 
 {/* SALES HISTORY */}
-<section className="mt-6 rounded-2xl border border-white/10 bg-[#141719] p-5">
+<section className="mt-6 rounded-2xl border border-white/10 bg-[#141719] p-4 sm:p-5">
 
-  <div className="flex items-center justify-between">
+  <div className="flex flex-wrap items-center justify-between gap-3">
     <div>
       <h2 className="text-xl font-black">
         SALES HISTORY
@@ -1471,7 +1533,7 @@ const saveEditedDish = async () => {
       salesHistory.map((day) => (
         <div
   key={day.dateKey}
-  className="grid grid-cols-[1fr_100px_140px_1fr_110px] items-center gap-4 rounded-xl border border-white/5 bg-[#1a1e21] p-4"
+  className="grid grid-cols-2 gap-4 rounded-xl border border-white/5 bg-[#1a1e21] p-4 md:grid-cols-[1fr_100px_140px_1fr_110px] md:items-center"
 >
 
           <div>
@@ -1538,9 +1600,9 @@ const saveEditedDish = async () => {
 
 {/* DAILY SALES REPORT MODAL */}
 {selectedSalesDay && selectedDayReport && (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6">
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-2 sm:p-4 lg:p-6">
 
-    <div className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-white/10 bg-[#111416] p-6">
+    <div className="max-h-[94vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-white/10 bg-[#111416] p-4 sm:p-6">
 
       <div className="flex items-start justify-between">
 
@@ -1571,7 +1633,7 @@ const saveEditedDish = async () => {
 
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-3">
+      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
 
         <div className="rounded-xl bg-[#1a1e21] p-5">
           <p className="text-xs text-gray-500">
@@ -1616,7 +1678,7 @@ const saveEditedDish = async () => {
           PAYMENT BREAKDOWN
         </h3>
 
-        <div className="mt-3 grid gap-3 md:grid-cols-4">
+        <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
 
           <div className="rounded-xl bg-[#1a1e21] p-4">
             <p className="text-xs text-gray-500">
@@ -1678,7 +1740,7 @@ const saveEditedDish = async () => {
             (item) => (
               <div
                 key={item.name}
-                className="grid grid-cols-[1fr_120px_160px] items-center rounded-xl bg-[#1a1e21] p-4"
+                className="grid grid-cols-1 gap-3 rounded-xl bg-[#1a1e21] p-4 sm:grid-cols-[1fr_100px_140px] sm:items-center md:grid-cols-[1fr_120px_160px]"
               >
 
                 <div className="font-bold">
@@ -1721,11 +1783,11 @@ const saveEditedDish = async () => {
 
 {/* MENU MANAGEMENT MODAL */}
 {showMenuManagement && (
-  <div className="fixed inset-0 z-50 bg-black/80 p-5">
+  <div className="fixed inset-0 z-50 bg-black/80 p-2 sm:p-4 lg:p-5">
     <div className="mx-auto flex max-h-[94vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#111416]">
 
       {/* HEADER */}
-      <div className="flex items-center justify-between border-b border-white/10 p-6">
+      <div className="flex items-start justify-between gap-3 border-b border-white/10 p-4 sm:p-6">
         <div>
           <p className="text-xs font-bold uppercase tracking-widest text-red-500">
             DINEVO ADMIN
@@ -1749,12 +1811,12 @@ const saveEditedDish = async () => {
       </div>
 
       {/* CONTENT */}
-      <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto p-6 lg:grid-cols-[280px_1fr]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto p-3 sm:p-5 lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-5 lg:p-6">
 
         {/* CATEGORIES */}
-        <aside className="rounded-2xl border border-white/10 bg-[#141719] p-5">
+        <aside className="rounded-2xl border border-white/10 bg-[#141719] p-4 sm:p-5">
 
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="font-black">
                 CATEGORIES
@@ -1775,7 +1837,7 @@ const saveEditedDish = async () => {
               menuCategories.map((category) => (
                 <div
                   key={category.id}
-                  className="flex items-center justify-between rounded-xl border border-white/5 bg-[#1a1e21] p-4"
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/5 bg-[#1a1e21] p-4"
                 >
                   <div>
                     <p className="font-bold">
@@ -1806,9 +1868,9 @@ const saveEditedDish = async () => {
         </aside>
 
         {/* DISHES */}
-        <section className="rounded-2xl border border-white/10 bg-[#141719] p-5">
+        <section className="rounded-2xl border border-white/10 bg-[#141719] p-4 sm:p-5">
 
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="font-black">
                 MENU ITEMS
@@ -1819,7 +1881,7 @@ const saveEditedDish = async () => {
               </p>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex w-full flex-wrap items-center gap-2 sm:gap-3 lg:w-auto lg:justify-end">
 
   <div className="rounded-lg bg-red-500/10 px-3 py-2 text-xs font-bold text-red-400">
     {menuItems.filter((item) => item.active).length} Active
@@ -1853,7 +1915,7 @@ const saveEditedDish = async () => {
                 return (
                   <div
                     key={item.id}
-                    className="grid gap-4 rounded-2xl border border-white/5 bg-[#1a1e21] p-4 md:grid-cols-[1fr_150px_120px_100px]"
+                    className="grid grid-cols-1 gap-4 rounded-2xl border border-white/5 bg-[#1a1e21] p-4 sm:grid-cols-2 md:grid-cols-[minmax(0,1fr)_120px_100px_minmax(180px,auto)]"
                   >
 
                     {/* NAME */}
@@ -1923,7 +1985,7 @@ const saveEditedDish = async () => {
       : "SOLD OUT"}
   </p>
 
-  <div className="mt-3 flex justify-end gap-2">
+  <div className="mt-3 flex flex-wrap gap-2 md:justify-end">
     <button
       onClick={() => toggleDishAvailability(item)}
       className={`rounded-lg border px-3 py-2 text-xs font-black transition ${
@@ -1960,9 +2022,9 @@ const saveEditedDish = async () => {
 
 {/* EDIT DISH MODAL */}
 {editingDish && (
-  <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-5">
+  <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-2 sm:p-5">
 
-    <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-white/10 bg-[#141719] p-6">
+    <div className="max-h-[94vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-white/10 bg-[#141719] p-4 sm:p-6">
 
       <div className="flex items-start justify-between">
         <div>
@@ -2024,7 +2086,7 @@ const saveEditedDish = async () => {
           />
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 
           <div>
             <label className="text-sm font-bold text-gray-400">
@@ -2095,9 +2157,38 @@ const saveEditedDish = async () => {
             }
             className="mt-2 w-full rounded-xl border border-white/10 bg-[#1a1e21] px-4 py-3 text-white outline-none focus:border-red-500"
           />
+          <div className="mt-3 rounded-xl border border-white/10 bg-[#101214] p-4">
+            {editingDish.image_url && (
+              <img src={editingDish.image_url} alt={`${editingDish.name} preview`} className="mb-3 h-40 w-full rounded-xl object-cover" />
+            )}
+            <label className={`flex min-h-11 cursor-pointer items-center justify-center rounded-xl bg-red-600 px-4 py-3 text-sm font-black text-white hover:bg-red-500 ${isUploadingDishImage ? "pointer-events-none opacity-60" : ""}`}>
+              {isUploadingDishImage ? "UPLOADING..." : editingDish.image_url ? "CHANGE PHOTO" : "UPLOAD PHOTO"}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                disabled={isUploadingDishImage}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) uploadDishImage(file, "edit");
+                  e.currentTarget.value = "";
+                }}
+              />
+            </label>
+            {editingDish.image_url && (
+              <button
+                type="button"
+                onClick={() => setEditingDish({ ...editingDish, image_url: null })}
+                className="mt-2 w-full rounded-xl border border-white/10 px-4 py-2 text-xs font-bold text-gray-400 hover:bg-white/5"
+              >
+                REMOVE PHOTO
+              </button>
+            )}
+            <p className="mt-2 text-xs text-gray-500">JPG, PNG or WebP · Maximum 5 MB</p>
+          </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 
           <div>
             <label className="text-sm font-bold text-gray-400">
@@ -2212,7 +2303,7 @@ const saveEditedDish = async () => {
 {showAddDish && (
   <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-5">
 
-    <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-white/10 bg-[#141719] p-6">
+    <div className="max-h-[94vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-white/10 bg-[#141719] p-4 sm:p-6">
 
       <div className="flex items-start justify-between">
 
@@ -2272,7 +2363,7 @@ const saveEditedDish = async () => {
           />
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 
           <div>
             <label className="text-sm font-bold text-gray-400">
@@ -2340,9 +2431,34 @@ const saveEditedDish = async () => {
             placeholder="https://..."
             className="mt-2 w-full rounded-xl border border-white/10 bg-[#1a1e21] px-4 py-3 text-white outline-none focus:border-red-500"
           />
+          <div className="mt-3 rounded-xl border border-white/10 bg-[#101214] p-4">
+            {newDishImageUrl && (
+              <img src={newDishImageUrl} alt="Dish preview" className="mb-3 h-40 w-full rounded-xl object-cover" />
+            )}
+            <label className={`flex min-h-11 cursor-pointer items-center justify-center rounded-xl bg-red-600 px-4 py-3 text-sm font-black text-white hover:bg-red-500 ${isUploadingDishImage ? "pointer-events-none opacity-60" : ""}`}>
+              {isUploadingDishImage ? "UPLOADING..." : newDishImageUrl ? "CHANGE PHOTO" : "UPLOAD PHOTO"}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                disabled={isUploadingDishImage}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) uploadDishImage(file, "new");
+                  e.currentTarget.value = "";
+                }}
+              />
+            </label>
+            {newDishImageUrl && (
+              <button type="button" onClick={() => setNewDishImageUrl("")} className="mt-2 w-full rounded-xl border border-white/10 px-4 py-2 text-xs font-bold text-gray-400 hover:bg-white/5">
+                REMOVE PHOTO
+              </button>
+            )}
+            <p className="mt-2 text-xs text-gray-500">JPG, PNG or WebP · Maximum 5 MB</p>
+          </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 
           <div>
             <label className="text-sm font-bold text-gray-400">

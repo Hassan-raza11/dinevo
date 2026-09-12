@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import StaffGuard from "@/components/StaffGuard";
+import StaffLogout from "@/components/StaffLogout";
 
 type RestaurantSettings = {
   restaurantName: string;
@@ -366,12 +367,12 @@ export default function KitchenPage() {
 
   return (
     <StaffGuard>
-      <main className="min-h-screen bg-[#0d0f10] text-white">
+      <main className="min-h-screen overflow-x-hidden bg-[#0d0f10] text-white">
         {/* HEADER */}
 
-        <header className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+        <header className="flex flex-col gap-4 border-b border-white/10 px-3 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between lg:px-6">
           <div>
-            <h1 className="text-3xl font-black">
+            <h1 className="text-xl font-black sm:text-2xl sm:text-3xl">
               <span className="text-red-600">
                 KITCHEN
               </span>{" "}
@@ -383,8 +384,8 @@ export default function KitchenPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="rounded-xl bg-[#1c1f21] px-5 py-3 text-xl font-bold">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:gap-3 lg:w-auto lg:justify-end lg:gap-4">
+            <div className="rounded-xl bg-[#1c1f21] px-4 py-3 text-base font-bold sm:px-5 sm:text-xl">
               {now
                 ? new Date(now).toLocaleTimeString([], {
                     hour: "2-digit",
@@ -393,11 +394,11 @@ export default function KitchenPage() {
                 : "--:--"}
             </div>
 
-            <div className="rounded-xl bg-[#1c1f21] px-5 py-3 font-semibold">
+            <div className="rounded-xl bg-[#1c1f21] px-4 py-3 text-sm break-words font-semibold sm:px-5 sm:text-base">
               Oldest First
             </div>
 
-            <div className="rounded-xl bg-[#1c1f21] px-5 py-3 font-semibold text-green-500">
+            <div className="rounded-xl bg-[#1c1f21] px-4 py-3 text-sm break-words font-semibold sm:px-5 sm:text-base text-green-500">
               ● Live
             </div>
 
@@ -405,7 +406,7 @@ export default function KitchenPage() {
               onClick={() =>
                 setUndoMode((current) => !current)
               }
-              className={`rounded-xl px-5 py-3 font-bold ${
+              className={`rounded-xl px-4 py-3 text-sm font-bold sm:px-5 sm:text-base ${
                 undoMode
                   ? "bg-yellow-500 text-black"
                   : "bg-[#1c1f21]"
@@ -413,12 +414,16 @@ export default function KitchenPage() {
             >
               ↶ Undo Mode
             </button>
+
+            <div className="sm:ml-auto lg:ml-0">
+              <StaffLogout />
+            </div>
           </div>
         </header>
 
         {/* ORDER COUNT */}
 
-        <div className="flex items-center gap-4 border-b border-white/10 px-6 py-3 text-sm text-gray-400">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:gap-3 lg:w-auto lg:justify-end lg:gap-4 border-b border-white/10 px-6 py-3 text-sm text-gray-400">
           <span>
             Orders 1–4 of {visibleOrders.length}
           </span>
@@ -427,7 +432,7 @@ export default function KitchenPage() {
             Swipe left / right to see more orders
           </span>
 
-          <span className="ml-auto">
+          <span className="sm:ml-auto">
             Target: {settings.preparationTime} min
           </span>
         </div>
@@ -435,9 +440,9 @@ export default function KitchenPage() {
         {/* NO ORDERS */}
 
         {visibleOrders.length === 0 && (
-          <div className="flex min-h-[70vh] items-center justify-center">
+          <div className="flex min-h-[60vh] items-center justify-center px-4 sm:min-h-[70vh]">
             <div className="text-center">
-              <p className="text-3xl font-bold">
+              <p className="text-2xl font-bold sm:text-3xl">
                 No Kitchen Orders
               </p>
 
@@ -451,8 +456,8 @@ export default function KitchenPage() {
         {/* ORDER COLUMNS */}
 
         {visibleOrders.length > 0 && (
-          <section className="overflow-x-auto px-5 py-5">
-            <div className="flex min-w-max gap-4">
+          <section className="overflow-x-auto px-3 py-4 sm:px-5 sm:py-5">
+            <div className="flex min-w-max snap-x snap-mandatory gap-3 sm:gap-4">
               {visibleOrders.map((order) => {
                 const totalItems =
                   order.guests.reduce(
@@ -521,14 +526,14 @@ export default function KitchenPage() {
                 return (
                   <article
                     key={order.id}
-                    className="flex h-[730px] w-[360px] flex-col rounded-2xl border border-white/15 bg-[#151819]"
+                    className="flex h-[70vh] min-h-[560px] max-h-[730px] w-[calc(100vw-24px)] max-w-[360px] shrink-0 snap-start flex-col rounded-2xl border border-white/15 bg-[#151819] sm:h-[730px] sm:w-[360px]"
                   >
                     {/* TABLE HEADER */}
 
-                    <div className="border-b border-white/10 p-5">
+                    <div className="border-b border-white/10 p-4 sm:p-5">
                       <div className="flex items-start justify-between">
                         <div>
-                          <h2 className="text-2xl font-black">
+                          <h2 className="text-xl font-black sm:text-2xl">
                             TABLE {order.tableNumber}
                           </h2>
 
@@ -538,7 +543,7 @@ export default function KitchenPage() {
                         </div>
 
                         <p
-                          className={`text-xl font-black ${timerColor}`}
+                          className={`text-lg font-black sm:text-xl ${timerColor}`}
                         >
                           {String(minutes).padStart(2, "0")}:
                           {String(seconds).padStart(2, "0")}
@@ -548,7 +553,7 @@ export default function KitchenPage() {
 
                     {/* GUESTS */}
 
-                    <div className="flex-1 space-y-3 overflow-y-auto p-3">
+                    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
                       {order.guests.map(
                         (guest, guestIndex) => (
                           <div
@@ -557,7 +562,7 @@ export default function KitchenPage() {
                           >
                             {/* GUEST NAME */}
 
-                            <div className="bg-red-700 px-4 py-3 font-bold uppercase">
+                            <div className="bg-red-700 px-3 py-3 text-sm font-bold uppercase sm:px-4 sm:text-base">
                               {guest.guestName}
                             </div>
 
@@ -574,13 +579,13 @@ export default function KitchenPage() {
                                       item.id
                                     )
                                   }
-                                  className={`flex w-full items-center justify-between px-4 py-3 text-left text-black transition ${
+                                  className={`flex min-h-12 w-full items-center justify-between gap-3 px-3 py-3 text-left text-black transition sm:px-4 ${
                                     item.done
                                       ? "bg-[#eef5df]"
                                       : "bg-white"
                                   }`}
                                 >
-                                  <div className="flex items-center gap-3">
+                                  <div className="flex min-w-0 items-center gap-3">
                                     <span
                                       className={`flex h-6 w-6 items-center justify-center rounded-full border text-xs ${
                                         item.done
@@ -591,7 +596,7 @@ export default function KitchenPage() {
                                       {item.done ? "✓" : ""}
                                     </span>
 
-                                    <span className="font-semibold">
+                                    <span className="break-words font-semibold">
                                       {item.name}
 
                                       {item.quantity > 1 && (
@@ -623,7 +628,7 @@ export default function KitchenPage() {
 
                     {/* PROGRESS */}
 
-                    <div className="border-t border-white/10 p-5">
+                    <div className="border-t border-white/10 p-4 sm:p-5">
                       <p className="font-bold">
                         <span className="text-green-500">
                           {completedItems}

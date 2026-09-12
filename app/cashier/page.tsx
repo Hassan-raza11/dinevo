@@ -9,6 +9,7 @@ import {
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import StaffGuard from "@/components/StaffGuard";
+import StaffLogout from "@/components/StaffLogout";
 
 type RestaurantSettings = {
   restaurantName: string;
@@ -1173,18 +1174,18 @@ export default function CashierPage() {
 
   return (
     <StaffGuard>
-      <main className="min-h-screen bg-[#0d0f10] text-white">
+      <main className="min-h-screen overflow-x-hidden bg-[#0d0f10] text-white">
         {/* HEADER */}
 
-        <header className="flex shrink-0 items-center gap-5 border-b border-white/10 px-5 py-3">
-          <div className="min-w-[310px]">
-            <h1 className="text-2xl font-black">
+        <header className="flex shrink-0 flex-col gap-3 border-b border-white/10 px-3 py-3 sm:px-4 lg:flex-row lg:items-center lg:gap-5 lg:px-5">
+          <div className="w-full lg:w-auto lg:min-w-[310px]">
+            <h1 className="flex flex-wrap items-center text-xl font-black sm:text-2xl">
               DINE
               <span className="text-red-500">
                 VO
               </span>
 
-              <span className="ml-5 text-xl">
+              <span className="ml-3 text-base sm:ml-5 sm:text-xl">
                 CASHIER COUNTER
               </span>
             </h1>
@@ -1196,10 +1197,10 @@ export default function CashierPage() {
               setSearch(e.target.value)
             }
             placeholder="Search by Table / Order # / Guest Name"
-            className="min-w-0 flex-1 rounded-xl border border-white/10 bg-[#171a1d] px-5 py-3 outline-none"
+            className="w-full min-w-0 rounded-xl border border-white/10 bg-[#171a1d] px-4 py-3 outline-none lg:flex-1 lg:px-5"
           />
 
-          <div className="rounded-xl bg-[#171a1d] px-4 py-3 font-bold">
+          <div className="w-full w-full rounded-xl bg-[#171a1d] px-4 py-3 text-center sm:w-auto font-bold sm:w-auto">
             Open Orders{" "}
             <span className="ml-2 rounded-full bg-red-600 px-2 py-1 text-xs">
               {openOrders.length}
@@ -1229,11 +1230,13 @@ export default function CashierPage() {
                 : "--/--/----"}
             </p>
           </div>
+
+          <StaffLogout />
         </header>
 
         {/* MAIN GRID */}
 
-        <section className="grid h-[570px] grid-cols-[290px_minmax(0,1fr)_390px] gap-4 p-4 pb-2">
+        <section className="grid grid-cols-1 gap-4 p-3 pb-2 sm:p-4 xl:h-[570px] xl:grid-cols-[290px_minmax(0,1fr)_390px]">
           {/* OPEN ORDERS */}
 
           <aside className="flex min-h-0 flex-col rounded-2xl border border-white/10 bg-[#131619] p-4">
@@ -1297,14 +1300,14 @@ export default function CashierPage() {
 
           {/* ORDER DETAILS */}
 
-          <section className="min-h-0 overflow-y-auto rounded-2xl border border-white/10 bg-[#131619] p-5">
+          <section className="min-h-0 overflow-y-auto rounded-2xl border border-white/10 bg-[#131619] p-4 sm:p-5 xl:h-full">
             {!selectedOrder ? (
-              <div className="flex min-h-[500px] items-center justify-center text-gray-500">
+              <div className="flex min-h-[220px] items-center justify-center text-gray-500 xl:min-h-[500px]">
                 Select an order.
               </div>
             ) : (
               <>
-                <div className="flex items-start justify-between border-b border-white/10 pb-5">
+                <div className="flex flex-col gap-4 border-b border-white/10 pb-5 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <p className="text-sm text-gray-400">
                       TABLE
@@ -1424,7 +1427,7 @@ export default function CashierPage() {
                     TOTAL AMOUNT
                   </span>
 
-                  <span className="text-2xl font-black">
+                  <span className="flex flex-wrap items-center text-xl font-black sm:text-2xl">
                     {settings.currencySymbol}
                     {selectedOrder.total.toFixed(2)}
                   </span>
@@ -1435,7 +1438,7 @@ export default function CashierPage() {
 
           {/* PAYMENT */}
 
-          <aside className="min-h-0 overflow-y-auto rounded-2xl border border-white/10 bg-[#131619] p-5">
+          <aside className="min-h-0 overflow-y-auto rounded-2xl border border-white/10 bg-[#131619] p-4 sm:p-5 xl:h-full">
             <h2 className="text-xl font-black">
               PAYMENT
             </h2>
@@ -1488,7 +1491,7 @@ export default function CashierPage() {
                   Add Payment
                 </p>
 
-                <div className="mt-3 grid grid-cols-4 gap-2">
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                   {[
                     {
                       value: "cash",
@@ -1548,7 +1551,7 @@ export default function CashierPage() {
                     Amount
                   </label>
 
-                  <div className="mt-2 flex gap-2">
+                  <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                     <input
                       type="number"
                       min="0"
@@ -1587,7 +1590,7 @@ export default function CashierPage() {
                       Ticket Restaurant
                     </p>
 
-                    <div className="mt-3 flex gap-2">
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                       <input
                         value={ticketCode}
                         onChange={(e) =>
@@ -1762,13 +1765,13 @@ export default function CashierPage() {
 
         {/* BOTTOM */}
 
-        <section className="grid grid-cols-[290px_minmax(0,1fr)] gap-4 px-4 pb-4 pt-2">
+        <section className="grid grid-cols-1 gap-4 px-3 pb-4 pt-2 sm:px-4 xl:grid-cols-[290px_minmax(0,1fr)]">
           <div className="rounded-2xl border border-white/10 bg-[#131619] p-4">
             <h3 className="font-bold">
               QUICK ACTIONS
             </h3>
 
-            <div className="mt-4 grid grid-cols-3 gap-2">
+            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
               <button
                 onClick={() =>
                   router.push(
@@ -1829,7 +1832,7 @@ export default function CashierPage() {
                       onClick={() =>
                         selectOrder(order.id)
                       }
-                      className={`min-w-[220px] shrink-0 rounded-lg border px-4 py-3 text-left ${
+                      className={`min-w-[190px] shrink-0 rounded-lg border px-4 py-3 text-left sm:min-w-[220px] ${
                         selectedOrderId ===
                         order.id
                           ? "border-green-500 bg-green-500/10"

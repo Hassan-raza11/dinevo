@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import StaffGuard from "@/components/StaffGuard";
+import StaffLogout from "@/components/StaffLogout";
 
 type WaiterItem = {
   id?: number;
@@ -522,27 +523,31 @@ const printWaiterOrder = (order: WaiterOrder) => {
 
   return (
     <StaffGuard>
-    <main className="min-h-screen bg-[#0d0f10] text-white">
-      <header className="border-b border-white/10 px-6 py-5">
-        <div className="flex items-center gap-5">
-          <h1 className="text-3xl font-black">
+    <main className="min-h-screen overflow-x-hidden bg-[#0d0f10] text-white">
+      <header className="border-b border-white/10 px-3 py-4 sm:px-5 sm:py-5 lg:px-6">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-5">
+          <h1 className="text-2xl font-black sm:text-3xl">
             DINE
             <span className="text-red-500">
               VO
             </span>
           </h1>
 
-          <div className="h-8 w-px bg-white/10" />
+          <div className="hidden h-8 w-px bg-white/10 sm:block" />
 
-          <h2 className="text-xl font-bold text-red-500">
+          <h2 className="text-base font-bold text-red-500 sm:text-xl">
             WAITER DISPLAY
           </h2>
+
+          <div className="ml-auto shrink-0">
+            <StaffLogout />
+          </div>
         </div>
       </header>
 
-      <section className="p-6">
+      <section className="p-3 sm:p-5 lg:p-6">
         {orders.length === 0 ? (
-          <div className="rounded-2xl border border-white/10 bg-[#141719] p-10 text-center">
+          <div className="rounded-2xl border border-white/10 bg-[#141719] p-6 text-center sm:p-10">
             <h2 className="text-xl font-bold">
               No service orders
             </h2>
@@ -552,15 +557,15 @@ const printWaiterOrder = (order: WaiterOrder) => {
             </p>
           </div>
         ) : (
-          <div className="grid gap-4 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
             {orders.map((order) => (
               <div
                 key={order.id}
-                className="rounded-2xl border border-white/10 bg-[#141719] p-5"
+                className="min-w-0 rounded-2xl border border-white/10 bg-[#141719] p-4 sm:p-5"
               >
-                <div className="flex items-start justify-between">
+                <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h3 className="text-xl font-black">
+                    <h3 className="text-lg font-black sm:text-xl">
                       TABLE {order.tableNumber}
                     </h3>
 
@@ -575,7 +580,7 @@ const printWaiterOrder = (order: WaiterOrder) => {
     updateWaiterStatus(order.id)
   }
   disabled={servingOrderId === order.id}
-  className={`mt-4 w-full rounded-xl py-3 font-black transition ${
+  className={`mt-4 min-h-12 w-full rounded-xl px-3 py-3 text-sm font-black transition sm:text-base ${
     servingOrderId === order.id
       ? "cursor-not-allowed bg-gray-700 text-gray-400"
       : "bg-green-600 text-white hover:bg-green-700"
@@ -586,12 +591,12 @@ const printWaiterOrder = (order: WaiterOrder) => {
     : "READY TO SERVE"}
 </button>
 
-                <div className="mt-5 space-y-5">
+                <div className="mt-4 space-y-4 sm:mt-5 sm:space-y-5">
                   {order.guests.map(
                     (guest, guestIndex) => (
                       <div
                         key={`${order.id}-${guestIndex}`}
-                        className="border-b border-white/10 pb-4 last:border-b-0"
+                        className="min-w-0 border-b border-white/10 pb-4 last:border-b-0"
                       >
                         <p className="font-bold text-red-500">
                           {guest.guestName}
@@ -602,13 +607,13 @@ const printWaiterOrder = (order: WaiterOrder) => {
                             (item, itemIndex) => (
                               <div
                                 key={`${item.name}-${itemIndex}`}
-                                className="flex items-center justify-between text-sm"
+                                className="flex min-w-0 items-start justify-between gap-3 text-sm"
                               >
-                                <span>
+                                <span className="min-w-0 break-words">
                                   {item.name}
                                 </span>
 
-                                <span className="font-bold text-red-500">
+                                <span className="shrink-0 font-bold text-red-500">
                                   × {item.quantity}
                                 </span>
                               </div>
@@ -617,7 +622,7 @@ const printWaiterOrder = (order: WaiterOrder) => {
 
 <button
   onClick={() => printWaiterOrder(order)}
-  className="mt-5 w-full rounded-xl border border-red-500 py-3 font-black text-red-500 transition hover:bg-red-500 hover:text-white"
+  className="mt-5 min-h-12 w-full rounded-xl border border-red-500 px-3 py-3 text-sm font-black text-red-500 transition hover:bg-red-500 hover:text-white sm:text-base"
 >
   🖨 PRINT
 </button>

@@ -253,11 +253,11 @@ export default function QRMenuPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#f5f5f5] pb-28">
-      <header className="sticky top-0 z-40 bg-black px-4 py-4 text-white shadow-lg">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
+    <main className="min-h-screen overflow-x-hidden bg-[#f5f5f5] pb-32 sm:pb-28">
+      <header className="sticky top-0 z-40 bg-black px-3 py-3 text-white shadow-lg sm:px-4 sm:py-4">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 sm:flex-nowrap sm:gap-4">
           <div className="min-w-0">
-            <h1 className="truncate text-xl font-black sm:text-2xl">
+            <h1 className="truncate text-lg font-black sm:text-2xl">
               {settings.restaurantName}
             </h1>
             <p className="text-[10px] text-gray-400">
@@ -265,14 +265,14 @@ export default function QRMenuPage() {
             </p>
           </div>
 
-          <div className="rounded-full border border-white/20 bg-white/10 px-3 py-2 text-xs font-black">
+          <div className="shrink-0 rounded-full border border-white/20 bg-white/10 px-2.5 py-2 text-[10px] font-black sm:px-3 sm:text-xs">
             QR MENU · PREVIEW ONLY
           </div>
         </div>
       </header>
 
-      <section className="mx-auto max-w-6xl px-4 py-5">
-        <div className="mb-5 rounded-2xl border border-red-100 bg-red-50 p-4">
+      <section className="mx-auto max-w-6xl px-3 py-4 sm:px-4 sm:py-5">
+        <div className="mb-4 rounded-2xl border border-red-100 bg-red-50 p-3 sm:mb-5 sm:p-4">
           <p className="font-black text-red-700">
             Build your selection while you wait
           </p>
@@ -287,16 +287,16 @@ export default function QRMenuPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search dishes..."
-            className="w-full rounded-2xl border bg-white px-4 py-3 outline-none focus:border-red-600"
+            className="min-h-12 w-full rounded-2xl border bg-white px-4 py-3 outline-none focus:border-red-600"
           />
         </div>
 
-        <div className="mb-5 flex gap-2 overflow-x-auto pb-2">
+        <div className="mb-4 flex snap-x gap-2 overflow-x-auto pb-2 sm:mb-5">
           {categories.map((item) => (
             <button
               key={item}
               onClick={() => setCategory(item)}
-              className={`shrink-0 rounded-full px-4 py-2 text-sm font-bold ${
+              className={`min-h-10 shrink-0 snap-start rounded-full px-4 py-2 text-sm font-bold ${
                 category === item
                   ? "bg-red-600 text-white"
                   : "border bg-white text-gray-700"
@@ -312,7 +312,7 @@ export default function QRMenuPage() {
             Loading menu...
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 min-[390px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
             {filteredMenu.map((item) => (
               <article
                 key={item.id}
@@ -342,12 +342,12 @@ export default function QRMenuPage() {
                   )}
                 </div>
 
-                <div className="p-3">
+                <div className="p-3 sm:p-3">
                   <h2 className="truncate text-sm font-black">
                     {item.name}
                   </h2>
 
-                  <div className="mt-3 flex items-center justify-between gap-2">
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3 gap-2">
                     <strong className="text-sm text-red-600">
                       {settings.currencySymbol}
                       {item.price.toFixed(2)}
@@ -356,7 +356,7 @@ export default function QRMenuPage() {
                     <div className="flex gap-2">
                       <button
                         onClick={() => setInfoItem(item)}
-                        className="flex h-8 w-8 items-center justify-center rounded-full border font-serif font-black text-gray-600"
+                        className="flex h-10 w-10 items-center justify-center rounded-full border font-serif font-black text-gray-600 sm:h-9 sm:w-9"
                       >
                         i
                       </button>
@@ -364,7 +364,7 @@ export default function QRMenuPage() {
                       <button
                         onClick={() => addItem(item)}
                         disabled={item.active === false}
-                        className="flex h-8 w-8 items-center justify-center rounded-full bg-red-600 text-lg font-black text-white disabled:cursor-not-allowed disabled:bg-gray-300"
+                        className="flex h-10 w-10 items-center justify-center rounded-full bg-red-600 text-lg font-black text-white disabled:cursor-not-allowed disabled:bg-gray-300 sm:h-9 sm:w-9"
                       >
                         {item.active === false ? "×" : "+"}
                       </button>
@@ -378,7 +378,7 @@ export default function QRMenuPage() {
       </section>
 
       <div className="fixed bottom-0 left-0 right-0 z-40 border-t bg-white p-3 shadow-[0_-8px_25px_rgba(0,0,0,0.08)]">
-        <div className="mx-auto flex max-w-6xl items-center gap-3">
+        <div className="mx-auto flex max-w-6xl flex-col gap-2 min-[390px]:flex-row min-[390px]:items-center sm:gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-xs font-bold text-gray-500">
               Your preview selection
@@ -395,7 +395,7 @@ export default function QRMenuPage() {
           <button
             onClick={() => setShowSelection(true)}
             disabled={cart.length === 0}
-            className="rounded-xl bg-black px-5 py-3 text-sm font-black text-white disabled:bg-gray-300"
+            className="min-h-12 w-full rounded-xl bg-black px-5 py-3 text-sm font-black text-white disabled:bg-gray-300 min-[390px]:w-auto"
           >
             View Selection
           </button>
@@ -403,19 +403,19 @@ export default function QRMenuPage() {
       </div>
 
       {infoItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-2 sm:p-4">
+          <div className="max-h-[95vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white sm:rounded-3xl">
             {infoItem.image && (
               <img
                 src={infoItem.image}
                 alt={infoItem.name}
-                className="h-56 w-full object-cover"
+                className="h-44 w-full object-cover sm:h-56"
               />
             )}
 
-            <div className="p-6">
-              <div className="flex items-start justify-between gap-4">
-                <h2 className="text-2xl font-black">
+            <div className="p-4 sm:p-6">
+              <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
+                <h2 className="text-xl font-black sm:text-2xl">
                   {infoItem.name}
                 </h2>
                 <strong className="shrink-0 text-xl text-red-600">
@@ -452,14 +452,14 @@ export default function QRMenuPage() {
       )}
 
       {showSelection && (
-        <div className="fixed inset-0 z-50 bg-black/70 p-3 sm:flex sm:items-center sm:justify-center">
-          <div className="max-h-[94vh] w-full overflow-y-auto rounded-3xl bg-white p-5 sm:max-w-xl">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-3">
+          <div className="max-h-[94vh] w-full overflow-y-auto rounded-t-3xl bg-white p-4 sm:max-w-xl sm:rounded-3xl sm:p-5">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs font-black uppercase tracking-wider text-red-600">
                   Preview only
                 </p>
-                <h2 className="text-2xl font-black">
+                <h2 className="text-xl font-black sm:text-2xl">
                   Your Selection
                 </h2>
               </div>
@@ -495,11 +495,11 @@ export default function QRMenuPage() {
                     </strong>
                   </div>
 
-                  <div className="mt-3 flex items-center justify-between">
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center rounded-xl border">
                       <button
                         onClick={() => decreaseItem(item.id)}
-                        className="px-4 py-2 font-black"
+                        className="min-h-11 min-w-11 px-4 py-2 font-black"
                       >
                         −
                       </button>
@@ -508,7 +508,7 @@ export default function QRMenuPage() {
                       </span>
                       <button
                         onClick={() => addItem(item)}
-                        className="px-4 py-2 font-black"
+                        className="min-h-11 min-w-11 px-4 py-2 font-black"
                       >
                         +
                       </button>
@@ -525,7 +525,7 @@ export default function QRMenuPage() {
               ))}
             </div>
 
-            <div className="mt-5 flex items-center justify-between rounded-2xl bg-black p-5 text-white">
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-black p-4 text-white sm:p-5">
               <span className="font-bold">
                 Estimated Total
               </span>
@@ -542,7 +542,7 @@ export default function QRMenuPage() {
 
             <button
               onClick={() => setShowSelection(false)}
-              className="mt-4 w-full rounded-xl bg-red-600 py-3 font-black text-white"
+              className="mt-4 min-h-12 w-full rounded-xl bg-red-600 py-3 font-black text-white"
             >
               Continue Browsing
             </button>
